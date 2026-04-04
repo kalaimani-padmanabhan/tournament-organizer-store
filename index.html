@@ -1,0 +1,306 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>BracketBase | Tournament Organizer</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=Sora:wght@600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="page-shell">
+        <header class="site-header">
+            <div class="brand">
+                <span class="brand-mark">BB</span>
+                <div class="brand-copy">
+                    <strong>BracketBase</strong>
+                    <small>Browser-based tournament organizer</small>
+                </div>
+            </div>
+            <div class="header-summary">
+                <div><span>Tournaments</span><strong id="summaryTournament">0</strong></div>
+                <div><span>Players</span><strong id="summaryTeams">0</strong></div>
+                <div><span>Matches</span><strong id="summaryMatches">0</strong></div>
+            </div>
+        </header>
+        <main class="app-grid">
+            <aside class="sidebar">
+                <button class="nav-item active" data-section="overview">Overview</button>
+                <button class="nav-item" data-section="tournament">Tournament Setup</button>
+                <button class="nav-item" data-section="standings">Standings</button>
+                <button class="nav-item" data-section="announcements">Announcements</button>
+            </aside>
+            <section class="content">
+                <section class="panel section-panel active" data-section="overview">
+                    <div class="panel-heading">
+                        <div><p class="eyebrow">Organizer Control Center</p></div>
+                        <button class="button ghost" id="resetAppButton" type="button">Reset Demo Data</button>
+                    </div>
+                    <div class="panel-card import-card">
+                        <div class="card-header">
+                            <h2>Saved tournaments</h2>
+                        </div>
+                        <p class="item-subtitle">Each saved tournament keeps its own category so one event entry does not overwrite another.</p>
+                        <div class="table-wrap">
+                            <table>
+                                <thead>
+                                    <tr>
+                                        <th>S.No</th>
+                                        <th>Tournament</th>
+                                        <th>Category</th>
+                                        <th>Format</th>
+                                        <th>Players</th>
+                                        <th>Notes</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="overviewTournamentList"></tbody>
+                            </table>
+                        </div>
+                    </div>
+                </section>
+                <section class="panel section-panel" data-section="tournament">
+                    <div class="panel-card import-card">
+                        <div class="card-header">
+                            <h2>Tournament options</h2>
+                        </div>
+                        <div class="export-actions">
+                            <button class="button" id="createTournamentButton" type="button">Create a Tournament</button>
+                            <button class="button secondary" id="editTournamentButton" type="button">Edit a Tournament</button>
+                        </div>
+                        <div id="tournamentModeStatus" class="empty-state small">Choose an option to continue.</div>
+                    </div>
+                    <div id="editTournamentPicker" class="panel-card import-card" style="display: none;">
+                        <div class="card-header">
+                            <h2>Select tournament to edit</h2>
+                        </div>
+                        <p class="item-subtitle">Choose an existing tournament and continue from its saved players, imports, and event details.</p>
+                        <label>Edit tournament
+                            <select id="editTournamentSelect">
+                                <option value="">No saved tournaments</option>
+                            </select>
+                        </label>
+                        <div id="editTournamentOptions" class="export-actions"></div>
+                    </div>
+                    <div id="tournamentWorkflow" style="display: none;">
+                        <div class="panel-card import-card">
+                            <div class="card-header">
+                                <h2>Import players</h2>
+                            </div>
+                            <p class="item-subtitle">Upload a CSV exported from Excel. The name is always shown, but player identity is matched using <strong>Registration Number</strong> or <strong>AADHAR Number</strong> together with <strong>Organization / Institution</strong> and <strong>Category</strong>. Organization can later be used for ballot preparation, and category separates events.</p>
+                            <div class="form-grid compact-form">
+                                <label class="span-2">CSV file<input id="importFile" type="file" accept=".csv"></label>
+                                <button class="button span-2" id="importFileButton" type="button">Import CSV</button>
+                            </div>
+                            <div id="detectedCategories" class="empty-state small">Detected categories: none</div>
+                            <div id="importStatus" class="empty-state small">No spreadsheet imported yet.</div>
+                        </div>
+                        <div class="panel-card import-card">
+                            <div class="card-header">
+                                <h2>Players list</h2>
+                            </div>
+                            <p class="item-subtitle">All imported players are shown here across categories so you can review the full event pool.</p>
+                            <div class="stat-grid players-summary">
+                                <article><span>Registered</span><strong id="playersRegistrationCount">0</strong></article>
+                                <article><span>Non Registered</span><strong id="playersAadharCount">0</strong></article>
+                                <article><span>Categories</span><strong id="playersCategoryCount">0</strong></article>
+                                <article><span>Organizations</span><strong id="playersOrganizationCount">0</strong></article>
+                            </div>
+                            <div class="panel-card import-card">
+                                <div class="card-header">
+                                    <h2>Export options</h2>
+                                </div>
+                                <div class="form-grid compact-form">
+                                    <label>Export option
+                                        <select id="downloadModeSelect">
+                                            <option value="all_players">All Players</option>
+                                            <option value="duplicate_entries">Duplicate Entries</option>
+                                            <option value="invalid_entries">Invalid Entries</option>
+                                            <option value="by_category">By Category</option>
+                                            <option value="by_organization">By Organization</option>
+                                        </select>
+                                    </label>
+                                    <button class="button secondary span-2" id="downloadButton" type="button">Export</button>
+                                </div>
+                                <div class="form-grid compact-form">
+                                    <label>Filter By Category
+                                        <select id="filterCategorySelect">
+                                            <option value="">All Categories</option>
+                                        </select>
+                                    </label>
+                                    <label>Filter By Organization
+                                        <select id="filterOrganizationSelect">
+                                            <option value="">All Organizations</option>
+                                        </select>
+                                    </label>
+                                </div>
+                            </div>
+                            <div class="table-wrap">
+                                <table>
+                                    <thead>
+                                        <tr>
+                                            <th>S.No</th>
+                                            <th>Player</th>
+                                            <th>Registration No.</th>
+                                            <th>Aadhar</th>
+                                            <th>Organization</th>
+                                            <th>Category</th>
+                                            <th>Contact</th>
+                                            <th>Action</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="teamsList"></tbody>
+                                </table>
+                            </div>
+                        </div>
+                        <div class="panel-card import-card">
+                            <div id="duplicateEntriesSection" class="panel-card import-card">
+                                <div class="card-header">
+                                    <h2>Duplicate entries</h2>
+                                </div>
+                                <div class="table-wrap">
+                                    <table>
+                                        <thead>
+                                            <tr>
+                                                <th>S.No</th>
+                                                <th>Player</th>
+                                                <th>Registration No.</th>
+                                                <th>Aadhar</th>
+                                                <th>Organization</th>
+                                                <th>Category</th>
+                                                <th>Reason</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody id="duplicateEntriesList"></tbody>
+                                    </table>
+                                </div>
+                            </div>
+                            <div id="invalidEntriesSection" class="panel-card import-card">
+                                <div class="card-header">
+                                    <h2>Invalid / missed entries</h2>
+                                </div>
+                                <div class="table-wrap">
+                                    <table>
+                                        <thead>
+                                            <tr>
+                                                <th>S.No</th>
+                                                <th>Player</th>
+                                                <th>Registration No.</th>
+                                                <th>Aadhar</th>
+                                                <th>Organization</th>
+                                                <th>Category</th>
+                                                <th>Reason</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody id="invalidEntriesList"></tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="panel-heading">
+                            <div>
+                                <p class="eyebrow">Tournament Setup</p>
+                                <h2>Core event details</h2>
+                            </div>
+                        </div>
+                        <form id="tournamentForm" class="form-grid" style="display: none;">
+                            <label>Tournament name<input id="tournamentName" type="text" placeholder="Summer Open Cup" required></label>
+                            <label>Format<select id="tournamentFormat"><option>League</option><option>Single Elimination</option><option>Round Robin</option><option>Hybrid</option></select></label>
+                            <label>Category<select id="tournamentCategory"><option value="">Import players to load categories</option></select></label>
+                            <label class="span-2">Notes<textarea id="tournamentNotes" rows="4" placeholder="Add event notes, rules, check-in time, or organizer instructions"></textarea></label>
+                            <button class="button span-2" type="submit">Save tournament</button>
+                        </form>
+                        <div id="tournamentSaveStatus" class="empty-state small" style="display: none;">No tournament saved yet.</div>
+                        <div class="panel-card import-card">
+                            <div class="card-header">
+                                <h2>Add player manually</h2>
+                            </div>
+                            <form id="manualPlayerForm" class="form-grid compact-form">
+                                <label>Player
+                                    <input id="manualPlayerName" type="text" placeholder="Aarav Mehta" required>
+                                </label>
+                                <label>Registration No.
+                                    <input id="manualRegistrationNumber" type="text" placeholder="CGDCA/N/7/57">
+                                </label>
+                                <label>Aadhar
+                                    <input id="manualAadhar" type="text" placeholder="123456789012">
+                                </label>
+                                <label>Organization
+                                    <input id="manualOrganization" type="text" placeholder="Nanganallur Carrom Academy">
+                                </label>
+                                <label>Category
+                                    <select id="manualCategory">
+                                        <option value="">Select category</option>
+                                    </select>
+                                </label>
+                                <label>Contact
+                                    <input id="manualContact" type="text" placeholder="+91 98765 43210">
+                                </label>
+                                <button class="button span-2" type="submit">Add player</button>
+                            </form>
+                            <div id="manualPlayerStatus" class="empty-state small">No manual player added yet.</div>
+                        </div>
+                    </div>
+                </section>
+                <section class="panel section-panel" data-section="standings">
+                    <div class="panel-heading">
+                        <div>
+                            <p class="eyebrow">Rankings</p>
+                            <h2>Knockout rankings</h2>
+                            <p class="item-subtitle" id="standingsContext">Select or save a tournament category to view rankings for that tournament.</p>
+                        </div>
+                    </div>
+                    <div class="form-grid compact-form">
+                        <label>Rankings category
+                            <select id="standingsCategory">
+                                <option value="">Import players to load categories</option>
+                            </select>
+                        </label>
+                    </div>
+                    <div class="table-wrap">
+                        <table>
+                            <thead>
+                                <tr><th>Rank</th><th>Player</th><th>Wins</th></tr>
+                            </thead>
+                            <tbody id="standingsTable"></tbody>
+                        </table>
+                    </div>
+                </section>
+                <section class="panel section-panel" data-section="announcements">
+                    <div class="panel-heading">
+                        <div>
+                            <p class="eyebrow">Announcements</p>
+                            <h2>Organizer notes for players</h2>
+                        </div>
+                    </div>
+                    <form id="announcementForm" class="form-grid compact-form">
+                        <label class="span-2">Announcement<textarea id="announcementText" rows="4" placeholder="Quarterfinals begin at 6:30 PM. Players must report 20 minutes early." required></textarea></label>
+                        <button class="button span-2" type="submit">Post update</button>
+                    </form>
+                    <div id="announcementsList" class="card-list"></div>
+                </section>
+            </section>
+        </main>
+    </div>
+    <template id="teamCardTemplate">
+        <tr class="player-row">
+            <td class="player-serial"></td>
+            <td class="item-title"></td>
+            <td class="player-reg"></td>
+            <td class="player-aadhar"></td>
+            <td class="player-org"></td>
+            <td class="player-category"></td>
+            <td class="player-contact"></td>
+            <td><button class="icon-button remove-team" type="button">Remove</button></td>
+        </tr>
+    </template>
+    <template id="announcementTemplate">
+        <article class="item-card">
+            <div><h3 class="item-title">Announcement</h3><p class="item-subtitle announcement-copy"></p></div>
+            <button class="icon-button remove-announcement" type="button">Remove</button>
+        </article>
+    </template>
+    <script src="script.js"></script>
+</body>
+</html>
