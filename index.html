@@ -32,8 +32,8 @@
                 <button class="nav-item" data-section="tournament">Tournament Setup</button>
                 <button class="nav-item" data-section="ballot">Ballot</button>
                 <button class="nav-item" data-section="bracket">Bracket</button>
+                <button class="nav-item" data-section="progress">Bracket Progress</button>
                 <button class="nav-item" data-section="standings">Standings</button>
-                <button class="nav-item" data-section="announcements">Announcements</button>
             </aside>
             <section class="content">
                 <section class="panel section-panel active" data-section="overview">
@@ -55,7 +55,7 @@
                                         <th>Category</th>
                                         <th>Format</th>
                                         <th>Players</th>
-                                        <th>Notes</th>
+                                        <th>Status</th>
                                     </tr>
                                 </thead>
                                 <tbody id="overviewTournamentList"></tbody>
@@ -210,6 +210,7 @@
                         <form id="tournamentForm" class="form-grid" style="display: none;">
                             <label>Tournament name<input id="tournamentName" type="text" placeholder="Summer Open Cup" required></label>
                             <label>Format<select id="tournamentFormat"><option>League</option><option>Single Elimination</option><option>Double Elimination</option><option>Round Robin</option><option>Hybrid</option></select></label>
+                            <label>Match rule<select id="tournamentMatchRule"><option value="single_25">Single game (25)</option><option value="best_of_3_25">Best of 3 (25)</option></select></label>
                             <label>Category<select id="tournamentCategory"><option value="">Import players to load categories</option></select></label>
                             <label class="span-2">Notes<textarea id="tournamentNotes" rows="4" placeholder="Add event notes, rules, check-in time, or organizer instructions"></textarea></label>
                             <button class="button span-2" type="submit">Save tournament</button>
@@ -256,11 +257,13 @@
                     </div>
                     <div class="panel-card import-card">
                         <div class="form-grid compact-form">
-                            <label>Saved tournament
+                            <label class="span-2">Saved tournament
                                 <select id="ballotTournamentSelect">
                                     <option value="">No saved tournaments</option>
                                 </select>
                             </label>
+                        </div>
+                        <div class="export-actions compact-form">
                             <button class="button secondary" id="ballotExportButton" type="button">Export ballot</button>
                         </div>
                         <div class="stat-grid players-summary">
@@ -303,27 +306,53 @@
                             </label>
                               <div class="bracket-actions">
                                 <button class="button secondary" id="generateBracketButton" type="button">Generate bracket</button>
-                                <button class="button ghost" id="bracketEditButton" type="button">Edit bracket</button>
-                                <button class="button ghost" id="bracketSaveButton" type="button">Save bracket</button>
-                                <button class="button ghost" id="exportBracketCsvButton" type="button">Export CSV</button>
-                                <button class="button ghost" id="exportBracketExcelButton" type="button">Export Excel</button>
-                                <button class="button ghost" id="exportBracketPdfButton" type="button">Export PDF</button>
+                                <button class="button ghost" id="showBracketButton" type="button">Show saved bracket</button>
                               </div>
                         </div>
-                        <div class="bracket-zoom-bar">
-                            <button class="button ghost" id="bracketZoomOutButton" type="button">A-</button>
-                            <span id="bracketZoomLabel">100%</span>
-                            <button class="button ghost" id="bracketZoomInButton" type="button">A+</button>
-                            <button class="button ghost" id="bracketZoomResetButton" type="button">Reset</button>
+                    </div>
+                </section>
+                <section class="panel section-panel" data-section="progress">
+                    <div class="panel-heading">
+                        <div>
+                            <p class="eyebrow">Bracket Progress</p>
+                            <h2>Enter Scores And Advance Winners</h2>
+                            <p class="item-subtitle">Choose a saved single-elimination tournament, enter scores match by match, and the next round pairings will update automatically.</p>
                         </div>
-                        <div id="bracketStatus" class="empty-state small">Choose a saved tournament to prepare its bracket.</div>
-                        <div class="stat-grid players-summary">
-                            <article><span>Entries</span><strong id="bracketPlayerCount">0</strong></article>
-                            <article><span>Bracket size</span><strong id="bracketSizeCount">0</strong></article>
-                            <article><span>Byes</span><strong id="bracketByeCount">0</strong></article>
-                            <article><span>Rounds</span><strong id="bracketRoundCount">0</strong></article>
+                    </div>
+                    <div class="panel-card import-card">
+                        <div class="form-grid compact-form">
+                            <label class="span-2">Saved tournament
+                                <select id="progressTournamentSelect">
+                                    <option value="">No saved tournaments</option>
+                                </select>
+                            </label>
+                            <label class="span-2">Match rule
+                                <select id="progressMatchRuleDisplay">
+                                    <option value="single_25">Single game (25)</option>
+                                    <option value="best_of_3_25">Best of 3 (25)</option>
+                                </select>
+                            </label>
                         </div>
-                        <div id="bracketRounds" class="bracket-grid"></div>
+                        <div id="progressStatus" class="empty-state small">Choose a saved tournament to enter bracket scores.</div>
+                        <div class="table-wrap">
+                            <table>
+                                <thead>
+                                    <tr>
+                                        <th>Round</th>
+                                        <th>Match</th>
+                                        <th>Player A</th>
+                                        <th>Score A</th>
+                                        <th></th>
+                                        <th>Score B</th>
+                                        <th>Player B</th>
+                                        <th>Winner</th>
+                                        <th>Result</th>
+                                        <th>Action</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="progressTableBody"></tbody>
+                            </table>
+                        </div>
                     </div>
                 </section>
                 <section class="panel section-panel" data-section="standings">
@@ -350,19 +379,6 @@
                         </table>
                     </div>
                 </section>
-                <section class="panel section-panel" data-section="announcements">
-                    <div class="panel-heading">
-                        <div>
-                            <p class="eyebrow">Announcements</p>
-                            <h2>Organizer notes for players</h2>
-                        </div>
-                    </div>
-                    <form id="announcementForm" class="form-grid compact-form">
-                        <label class="span-2">Announcement<textarea id="announcementText" rows="4" placeholder="Quarterfinals begin at 6:30 PM. Players must report 20 minutes early." required></textarea></label>
-                        <button class="button span-2" type="submit">Post update</button>
-                    </form>
-                    <div id="announcementsList" class="card-list"></div>
-                </section>
             </section>
         </main>
     </div>
@@ -377,12 +393,6 @@
             <td class="player-contact"></td>
             <td><button class="icon-button remove-team" type="button">Remove</button></td>
         </tr>
-    </template>
-    <template id="announcementTemplate">
-        <article class="item-card">
-            <div><h3 class="item-title">Announcement</h3><p class="item-subtitle announcement-copy"></p></div>
-            <button class="icon-button remove-announcement" type="button">Remove</button>
-        </article>
     </template>
     <script src="script.js"></script>
 </body>

@@ -4,6 +4,7 @@ const defaultState = {
     tournament: {
         name: "",
         format: "League",
+        matchRule: "single_25",
         category: "",
         notes: "",
     },
@@ -30,6 +31,9 @@ let bracketEditMode = false;
 let bracketDirty = false;
 let bracketDraft = null;
 let selectedBracketSwapSlot = null;
+let bracketPopupRef = null;
+let bracketStatusMessage = "";
+let progressTournamentId = "";
 
 const elements = {
     pageShell: document.querySelector(".page-shell"),
@@ -60,6 +64,7 @@ const elements = {
     tournamentForm: document.getElementById("tournamentForm"),
     tournamentName: document.getElementById("tournamentName"),
     tournamentFormat: document.getElementById("tournamentFormat"),
+    tournamentMatchRule: document.getElementById("tournamentMatchRule"),
     tournamentCategory: document.getElementById("tournamentCategory"),
     tournamentNotes: document.getElementById("tournamentNotes"),
     tournamentSaveStatus: document.getElementById("tournamentSaveStatus"),
@@ -95,6 +100,11 @@ const elements = {
     ballotList: document.getElementById("ballotList"),
     bracketTournamentSelect: document.getElementById("bracketTournamentSelect"),
     generateBracketButton: document.getElementById("generateBracketButton"),
+    showBracketButton: document.getElementById("showBracketButton"),
+    progressTournamentSelect: document.getElementById("progressTournamentSelect"),
+    progressMatchRuleDisplay: document.getElementById("progressMatchRuleDisplay"),
+    progressStatus: document.getElementById("progressStatus"),
+    progressTableBody: document.getElementById("progressTableBody"),
     bracketEditButton: document.getElementById("bracketEditButton"),
     bracketSaveButton: document.getElementById("bracketSaveButton"),
     exportBracketCsvButton: document.getElementById("exportBracketCsvButton"),
@@ -149,13 +159,14 @@ function bindEvents() {
             return;
         }
         state.tournament = {
-            name: elements.tournamentName.value.trim(),
+            name: formatTournamentName(elements.tournamentName.value.trim(), elements.tournamentCategory.value),
             format: elements.tournamentFormat.value,
+            matchRule: elements.tournamentMatchRule?.value || "single_25",
             category: elements.tournamentCategory.value,
             notes: elements.tournamentNotes.value.trim(),
         };
         saveTournamentEntry();
-        const savedLabel = `${state.tournament.name} - ${state.tournament.category}`;
+        const savedLabel = state.tournament.name;
         tournamentMode = "";
         activeTournamentId = "";
         resetWorkingTournament();
@@ -181,6 +192,7 @@ function bindEvents() {
             state.tournament = {
                 name: "",
                 format: "League",
+                matchRule: "single_25",
                 category: "",
                 notes: "",
             };
@@ -345,6 +357,29 @@ function bindEvents() {
               persist();
               renderAll();
               setBracketStatus("Bracket generated for the selected tournament.");
+              const updatedTournament = state.tournaments.find((item) => item.id === bracketTournamentId);
+              const updatedBracket = getActiveBracketPreview(updatedTournament);
+              if (updatedTournament && updatedBracket) {
+                  openBracketWindow(updatedTournament, updatedBracket);
+              }
+          });
+      }
+
+      if (elements.showBracketButton) {
+          elements.showBracketButton.addEventListener("click", () => {
+              if (!bracketTournamentId) {
+                  setBracketStatus("Choose a saved tournament before opening the bracket.");
+                  return;
+              }
+
+              const currentTournament = state.tournaments.find((item) => item.id === bracketTournamentId);
+              const currentBracket = getActiveBracketPreview(currentTournament);
+              if (!currentTournament || !currentBracket) {
+                  setBracketStatus("No saved bracket is available for the selected tournament yet.");
+                  return;
+              }
+
+              openBracketWindow(currentTournament, currentBracket);
           });
       }
 
@@ -379,13 +414,13 @@ function bindEvents() {
           });
       }
 
-      if (elements.bracketSaveButton) {
-          elements.bracketSaveButton.addEventListener("click", () => {
-              const tournamentIndex = state.tournaments.findIndex((item) => item.id === bracketTournamentId);
-              if (tournamentIndex === -1 || !bracketEditMode || !bracketDraft) {
-                  setBracketStatus("Nothing to save yet.");
-                  return;
-              }
+    if (elements.bracketSaveButton) {
+        elements.bracketSaveButton.addEventListener("click", () => {
+            const tournamentIndex = state.tournaments.findIndex((item) => item.id === bracketTournamentId);
+            if (tournamentIndex === -1 || !bracketEditMode || !bracketDraft) {
+                setBracketStatus("Nothing to save yet.");
+                return;
+            }
 
               if (!bracketDirty) {
                   setBracketStatus("No bracket changes to save.");
@@ -396,13 +431,17 @@ function bindEvents() {
                   return;
               }
 
-              state.tournaments[tournamentIndex].bracket = cloneState(bracketDraft);
-              bracketEditMode = false;
-              bracketDirty = false;
-              bracketDraft = null;
-              selectedBracketSwapSlot = null;
-              persist();
-              renderAll();
+            const savedBracket = cloneState(bracketDraft);
+            recomputeSingleEliminationProgress(savedBracket);
+            applyByeAdvancements(savedBracket);
+            syncByeAdvancementSlots(savedBracket);
+            state.tournaments[tournamentIndex].bracket = savedBracket;
+            bracketEditMode = false;
+            bracketDirty = false;
+            bracketDraft = null;
+            selectedBracketSwapSlot = null;
+            persist();
+            renderAll();
               setBracketStatus("Bracket changes saved.");
           });
       }
@@ -473,22 +512,71 @@ function bindEvents() {
         });
     }
 
-    elements.announcementForm.addEventListener("submit", (event) => {
-        event.preventDefault();
-        const message = elements.announcementText.value.trim();
-        if (!message) {
-            return;
-        }
-
-        state.announcements.unshift({
-            id: createId(),
-            message,
+    if (elements.progressTournamentSelect) {
+        elements.progressTournamentSelect.addEventListener("change", () => {
+            progressTournamentId = elements.progressTournamentSelect.value || "";
+            renderBracketProgress();
         });
+    }
 
-        elements.announcementForm.reset();
-        persist();
-        renderAll();
-    });
+    if (elements.progressMatchRuleDisplay) {
+        elements.progressMatchRuleDisplay.addEventListener("change", () => {
+            const tournamentIndex = state.tournaments.findIndex((item) => item.id === progressTournamentId);
+            if (tournamentIndex === -1) {
+                return;
+            }
+
+            state.tournaments[tournamentIndex].matchRule = elements.progressMatchRuleDisplay.value || "single_25";
+            if (activeTournamentId === progressTournamentId) {
+                state.tournament.matchRule = state.tournaments[tournamentIndex].matchRule;
+                if (elements.tournamentMatchRule) {
+                    elements.tournamentMatchRule.value = state.tournament.matchRule;
+                }
+            }
+            persist();
+            renderAll();
+            setProgressStatus(`Match rule updated to ${getMatchRuleLabel(state.tournaments[tournamentIndex].matchRule)}.`);
+        });
+    }
+
+    if (elements.progressTableBody) {
+        elements.progressTableBody.addEventListener("click", (event) => {
+            const sheetButton = event.target.closest("[data-progress-sheet]");
+            if (sheetButton) {
+                openProgressScoreSheet(sheetButton.dataset.progressSheet || "");
+                return;
+            }
+            const button = event.target.closest("[data-progress-save]");
+            if (!button) {
+                const unlockButton = event.target.closest("[data-progress-unlock]");
+                if (!unlockButton) {
+                    return;
+                }
+                unlockBracketProgressResult(unlockButton.dataset.progressUnlock || "");
+                return;
+            }
+            saveBracketProgressResult(button.dataset.progressSave || "");
+        });
+    }
+
+    if (elements.announcementForm) {
+        elements.announcementForm.addEventListener("submit", (event) => {
+            event.preventDefault();
+            const message = elements.announcementText.value.trim();
+            if (!message) {
+                return;
+            }
+
+            state.announcements.unshift({
+                id: createId(),
+                message,
+            });
+
+            elements.announcementForm.reset();
+            persist();
+            renderAll();
+        });
+    }
 
     elements.resetAppButton.addEventListener("click", () => {
         state = cloneState(defaultState);
@@ -509,6 +597,8 @@ function renderAll() {
     renderBallot();
     renderBracketTournamentOptions();
     renderBracket();
+    renderBracketProgressTournamentOptions();
+    renderBracketProgress();
     renderStandings();
     renderAnnouncements();
     renderDetectedCategories();
@@ -520,6 +610,7 @@ function renderAll() {
     renderFilterOrganizationOptions();
     renderEditTournamentOptions();
     renderTournamentMode();
+    refreshBracketPopup();
 }
 
 function renderSidebarState() {
@@ -589,6 +680,7 @@ function resetWorkingTournament() {
     state.tournament = {
         name: "",
         format: "League",
+        matchRule: "single_25",
         category: "",
         notes: "",
     };
@@ -627,6 +719,7 @@ function loadTournamentEntry(tournamentId) {
     state.tournament = {
         name: selected.name || "",
         format: selected.format || "League",
+        matchRule: selected.matchRule || "single_25",
         category: selected.category || "",
         notes: selected.notes || "",
     };
@@ -669,6 +762,7 @@ function loadTournamentEntry(tournamentId) {
 
 function saveTournamentEntry() {
     const tournamentCategory = String(state.tournament.category || "").trim();
+    state.tournament.name = formatTournamentName(state.tournament.name, tournamentCategory);
     const tournamentTeams = normalizeTeams(state.teams).filter(
         (team) => String(team.category || "").trim() === tournamentCategory
     );
@@ -681,8 +775,9 @@ function saveTournamentEntry() {
 
     const entry = {
         id: existingIndex === -1 ? createId() : state.tournaments[existingIndex].id,
-        name: state.tournament.name,
+        name: formatTournamentName(state.tournament.name, state.tournament.category),
         format: state.tournament.format,
+        matchRule: state.tournament.matchRule || "single_25",
         category: state.tournament.category,
         notes: state.tournament.notes,
         playerCount: tournamentTeams.length,
@@ -894,6 +989,9 @@ function renderTournamentForm() {
     }
     elements.tournamentName.value = state.tournament.name;
     elements.tournamentFormat.value = state.tournament.format;
+    if (elements.tournamentMatchRule) {
+        elements.tournamentMatchRule.value = state.tournament.matchRule || "single_25";
+    }
     elements.tournamentNotes.value = state.tournament.notes;
 }
 
@@ -931,9 +1029,8 @@ function renderEditTournamentOptions() {
     elements.editTournamentSelect.innerHTML = ['<option value="">Select a tournament</option>']
         .concat(
             state.tournaments.map((item) => {
-                const label = `${item.name} - ${item.category}`;
                 const selected = tournamentMode === "edit" && item.id === activeTournamentId ? ' selected' : "";
-                return `<option value="${item.id}"${selected}>${escapeHtml(label)}</option>`;
+                return `<option value="${item.id}"${selected}>${escapeHtml(item.name)}</option>`;
             })
         )
         .join("");
@@ -944,7 +1041,7 @@ function renderEditTournamentOptions() {
             const button = document.createElement("button");
             button.type = "button";
             button.className = item.id === activeTournamentId ? "button" : "button secondary";
-            button.textContent = `${item.name} - ${item.category}`;
+            button.textContent = item.name;
             button.addEventListener("click", () => {
                 activeTournamentId = item.id;
                 if (elements.editTournamentSelect) {
@@ -953,6 +1050,21 @@ function renderEditTournamentOptions() {
                 loadTournamentEntry(item.id);
                 setTournamentModeStatus("");
                 renderAll();
+            });
+            button.addEventListener("dblclick", () => {
+                const currentBaseName = getTournamentBaseName(item.name, item.category);
+                const nextBaseName = window.prompt("Edit tournament name", currentBaseName);
+                if (nextBaseName === null) {
+                    return;
+                }
+
+                const trimmedName = nextBaseName.trim();
+                if (!trimmedName) {
+                    window.alert("Tournament name cannot be empty.");
+                    return;
+                }
+
+                renameTournamentEntry(item.id, trimmedName);
             });
             elements.editTournamentOptions.appendChild(button);
         });
@@ -1039,8 +1151,9 @@ function buildSingleEliminationBracketData(players, startSequence = 1) {
                 label: formatBracketPlayerLabel(player),
                 seed: player.seed,
                 bye: false,
+                sourceMatchLabel: "",
             }
-            : { type: "bye", label: "BYE" }
+            : { type: "bye", label: "BYE", sourceMatchLabel: "" }
     ));
     let matchSequence = startSequence;
     const roundCount = Math.log2(size);
@@ -1060,11 +1173,16 @@ function buildSingleEliminationBracketData(players, startSequence = 1) {
                 displayLabel: autoAdvance ? roundLabel : `${roundLabel} - ${label}`,
                 slotA: slotA?.label || "TBD",
                 slotB: slotB?.label || "TBD",
+                sourceA: slotA?.sourceMatchLabel || "",
+                sourceB: slotB?.sourceMatchLabel || "",
                 seedA: slotA?.seed || "",
                 seedB: slotB?.seed || "",
                 byeA: Boolean(slotA?.bye),
                 byeB: Boolean(slotB?.bye),
                 isPlayable: !autoAdvance,
+                scoreA: "",
+                scoreB: "",
+                winnerSide: "",
             });
 
             if (autoAdvance) {
@@ -1073,6 +1191,7 @@ function buildSingleEliminationBracketData(players, startSequence = 1) {
                 nextEntries.push({
                     type: "winner_ref",
                     label: `Winner of ${label}`,
+                    sourceMatchLabel: label,
                     bye: false,
                 });
             }
@@ -1416,13 +1535,18 @@ function renderBracketSvg(bracket, tournament, options = {}) {
             const topMidY = topSlotY + layout.slotHeight / 2;
             const bottomMidY = bottomSlotY + layout.slotHeight / 2;
             const mergeMidY = (topMidY + bottomMidY) / 2;
-
-            if (!match.isPlayable) {
-                return;
-            }
+            const isByeMatch = Boolean(
+                match.byeA
+                || match.byeB
+                || /^BYE$/i.test(String(match.slotA || "").trim())
+                || /^BYE$/i.test(String(match.slotB || "").trim())
+            );
+            const matchClass = match.isPlayable
+                ? `svg-match-box${isByeMatch ? " svg-match-box-bye" : ""}`
+                : `svg-match-box svg-match-box-auto${isByeMatch ? " svg-match-box-bye" : ""}`;
 
             parts.push(
-                `<rect x="${matchBox.x}" y="${matchBox.y}" width="${matchBox.width}" height="${matchBox.height}" rx="18" class="${match.isPlayable ? "svg-match-box" : "svg-match-box svg-match-box-auto"}"></rect>`,
+                `<rect x="${matchBox.x}" y="${matchBox.y}" width="${matchBox.width}" height="${matchBox.height}" rx="18" class="${matchClass}"></rect>`,
                 `<text x="${matchBox.x + 14}" y="${matchBox.y + 18}" class="${match.isPlayable ? "svg-match-label" : "svg-match-label svg-match-label-auto"}">${escapeXml(match.displayLabel || match.label)}</text>`,
                 renderSvgSlot(matchBox.x + 12, topSlotY, layout, match.seedA, match.slotA, match.byeA, roundIndex, matchIndex, "slotA", sectionKey),
                 renderSvgSlot(matchBox.x + 12, bottomSlotY, layout, match.seedB, match.slotB, match.byeB, roundIndex, matchIndex, "slotB", sectionKey)
@@ -1460,15 +1584,26 @@ function renderBracketSvg(bracket, tournament, options = {}) {
 }
 
 function renderSvgSlot(x, y, layout, seed, label, bye, roundIndex, matchIndex, field, sectionKey = "main") {
-    const slotLabel = bye ? addByeNoteToLabel(label || "TBD") : (label || "TBD");
+    const slotLines = getBracketSlotLines(label || "TBD", bye);
     const isSelected = isSelectedBracketSwapSlot(sectionKey, roundIndex, matchIndex, field);
-    const slotClass = isSelected ? "svg-slot svg-slot-editable svg-slot-selected" : "svg-slot svg-slot-editable";
-    const textClass = isSelected ? "svg-slot-text svg-slot-editable svg-slot-text-selected" : "svg-slot-text svg-slot-editable";
+    const byeClass = bye ? " svg-slot-bye" : "";
+    const byeTextClass = bye ? " svg-slot-text-bye" : "";
+    const slotClass = isSelected
+        ? `svg-slot svg-slot-editable svg-slot-selected${byeClass}`
+        : `svg-slot svg-slot-editable${byeClass}`;
+    const textClass = isSelected
+        ? `svg-slot-text svg-slot-editable svg-slot-text-selected${byeTextClass}`
+        : `svg-slot-text svg-slot-editable${byeTextClass}`;
+    const textX = x + 8 + layout.seedWidth + 10;
+    const singleLineY = y + layout.slotHeight / 2 + 4;
+    const multiLineTopY = y + 9.5;
     return [
         `<rect x="${x}" y="${y}" width="${layout.slotWidth}" height="${layout.slotHeight}" rx="12" class="${slotClass}" data-bracket-slot="${escapeHtml(field || "")}" data-bracket-section="${escapeHtml(sectionKey)}" data-round-index="${roundIndex}" data-match-index="${matchIndex}"></rect>`,
         `<rect x="${x + 8}" y="${y + 6}" width="${layout.seedWidth}" height="${layout.slotHeight - 12}" rx="8" class="svg-seed-box"></rect>`,
-        `<text x="${x + 8 + layout.seedWidth / 2}" y="${y + layout.slotHeight / 2 + 4}" text-anchor="middle" class="svg-seed-text">${escapeXml(seed || "-")}</text>`,
-        `<text x="${x + 8 + layout.seedWidth + 12}" y="${y + layout.slotHeight / 2 + 4}" class="${textClass}" data-bracket-slot="${escapeHtml(field || "")}" data-bracket-section="${escapeHtml(sectionKey)}" data-round-index="${roundIndex}" data-match-index="${matchIndex}">${escapeXml(slotLabel)}</text>`,
+        `<text x="${x + 8 + layout.seedWidth / 2}" y="${y + layout.slotHeight / 2 + 4}" text-anchor="middle" class="svg-seed-text">${escapeXml(seed || "")}</text>`,
+        slotLines.secondary
+            ? `<text x="${textX}" y="${multiLineTopY}" class="${textClass}" data-bracket-slot="${escapeHtml(field || "")}" data-bracket-section="${escapeHtml(sectionKey)}" data-round-index="${roundIndex}" data-match-index="${matchIndex}"><tspan x="${textX}" y="${multiLineTopY}">${escapeXml(slotLines.primary)}</tspan><tspan x="${textX}" y="${multiLineTopY + 10}">${escapeXml(slotLines.secondary)}</tspan></text>`
+            : `<text x="${textX}" y="${singleLineY}" class="${textClass}" data-bracket-slot="${escapeHtml(field || "")}" data-bracket-section="${escapeHtml(sectionKey)}" data-round-index="${roundIndex}" data-match-index="${matchIndex}">${escapeXml(slotLines.primary)}</text>`,
     ].join("");
 }
 
@@ -1499,25 +1634,25 @@ function getBracketSvgLayout(rounds) {
     const headerHeight = 64;
     const titleY = 58;
     const roundTitleOffset = 24;
-    const matchWidth = 248;
-    const matchHeight = 112;
-    const labelHeight = 22;
-    const slotHeight = 30;
-    const slotGap = 10;
+    const matchWidth = 166;
+    const matchHeight = 84;
+    const labelHeight = 20;
+    const slotHeight = 22;
+    const slotGap = 4;
     const slotWidth = matchWidth - 24;
-    const seedWidth = 24;
-    const baseGap = 28;
+    const seedWidth = 20;
+    const baseGap = 4;
     const baseStep = matchHeight + baseGap;
     const firstCenterY = headerHeight + roundTitleOffset + matchHeight / 2;
     const firstRoundMatches = rounds[0]?.matches.length || 0;
     const bodyHeight = firstRoundMatches > 0
         ? firstRoundMatches * matchHeight + (firstRoundMatches - 1) * baseGap
         : matchHeight;
-    const championWidth = 220;
-    const championHeight = 92;
+    const championWidth = 146;
+    const championHeight = 64;
     const championY = headerHeight + roundTitleOffset + bodyHeight / 2 - championHeight / 2;
-    const connectorReach = 18;
-    const columnWidth = 320;
+    const connectorReach = 12;
+    const columnWidth = 196;
     const rightSafety = 56;
     const heightSafety = 36;
     const width = paddingX * 2 + rounds.length * columnWidth + championWidth + rightSafety;
@@ -1590,11 +1725,23 @@ function exportBracketPdf(tournament) {
                     fill: #111111;
                 }
                 .svg-match-box,
+                .svg-match-box-bye,
                 .svg-slot,
+                .svg-slot-bye,
                 .svg-seed-box,
                 .svg-champion-box {
                     fill: #ffffff;
                     stroke: #bcbcbc;
+                }
+                .svg-match-box-bye {
+                    fill: #fff1e1;
+                    stroke: #d5c0a6;
+                }
+                .svg-slot-bye {
+                    fill: #fff7ee;
+                }
+                .svg-slot-text-bye {
+                    fill: #8b5c2e;
                 }
                 .svg-connector {
                     stroke: #8f8f8f;
@@ -1877,9 +2024,8 @@ function renderBallotTournamentOptions() {
 
     elements.ballotTournamentSelect.innerHTML = state.tournaments
         .map((item) => {
-            const label = `${item.name} - ${item.category}`;
             const selected = item.id === ballotTournamentId ? ' selected' : "";
-            return `<option value="${item.id}"${selected}>${escapeHtml(label)}</option>`;
+            return `<option value="${item.id}"${selected}>${escapeHtml(item.name)}</option>`;
         })
         .join("");
 }
@@ -1933,6 +2079,587 @@ function renderBallot() {
         .join("");
 }
 
+function openBracketWindow(tournament, bracket) {
+    if (!bracket) {
+        return;
+    }
+
+    const bracketWindow = bracketPopupRef && !bracketPopupRef.closed
+        ? bracketPopupRef
+        : window.open("", "bracket-preview-window", "width=1400,height=900,resizable=yes,scrollbars=yes");
+    if (!bracketWindow) {
+        setBracketStatus("The new bracket window was blocked. Please allow pop-ups for this page and try again.");
+        return;
+    }
+    bracketPopupRef = bracketWindow;
+
+    const preview = ensureByeAdvancements(tournament, bracket);
+    const bracketMarkup = renderBracketMarkup(preview.bracket || bracket, tournament);
+    const summary = getBracketSummary(tournament, preview.bracket || bracket);
+    const editLabel = bracketEditMode ? "Cancel edit" : "Edit bracket";
+    const saveDisabled = !bracketEditMode || !bracketDirty ? "disabled" : "";
+    bracketWindow.document.open();
+    bracketWindow.document.write(`
+        <!doctype html>
+        <html lang="en">
+        <head>
+            <meta charset="utf-8">
+            <title>${escapeHtml(`${tournament.name} - ${tournament.category} Bracket`)}</title>
+            <style>
+                :root {
+                    color-scheme: dark;
+                    --bg: #07111e;
+                    --surface: rgba(13, 25, 43, 0.96);
+                    --line: rgba(171, 202, 255, 0.14);
+                    --text: #f2f7ff;
+                    --muted: #9bb2d1;
+                    --accent: #ff914d;
+                }
+                * { box-sizing: border-box; }
+                body {
+                    margin: 0;
+                    padding: 10px;
+                    color: var(--text);
+                    font-family: "Segoe UI", Arial, sans-serif;
+                    background:
+                        radial-gradient(circle at 10% 10%, rgba(34, 211, 182, 0.16), transparent 28%),
+                        radial-gradient(circle at 90% 12%, rgba(255, 145, 77, 0.18), transparent 22%),
+                        linear-gradient(180deg, #04101b 0%, var(--bg) 100%);
+                    overflow: auto;
+                }
+                .shell {
+                    width: 100%;
+                    margin: 0 auto;
+                    height: calc(100vh - 20px);
+                    display: grid;
+                    grid-template-rows: auto 1fr;
+                    gap: 10px;
+                }
+                .header {
+                    display: flex;
+                    justify-content: space-between;
+                    align-items: flex-start;
+                    gap: 18px;
+                    padding: 12px 16px;
+                    border: 1px solid var(--line);
+                    border-radius: 16px;
+                    background: var(--surface);
+                }
+                .header h1 {
+                    margin: 0 0 4px;
+                    font-size: 22px;
+                }
+                .header p {
+                    margin: 0;
+                    color: var(--muted);
+                    font-size: 13px;
+                }
+                .badge {
+                    display: inline-block;
+                    padding: 6px 11px;
+                    border-radius: 999px;
+                    background: rgba(255, 145, 77, 0.14);
+                    color: #ffc29a;
+                    font-weight: 700;
+                }
+                .toolbar {
+                    display: flex;
+                    flex-wrap: wrap;
+                    gap: 10px;
+                }
+                .toolbar button {
+                    border: 1px solid var(--line);
+                    border-radius: 12px;
+                    background: rgba(255,255,255,0.04);
+                    color: var(--text);
+                    padding: 10px 14px;
+                    cursor: pointer;
+                }
+                .toolbar button[disabled] {
+                    opacity: 0.5;
+                    cursor: not-allowed;
+                }
+                .status {
+                    padding: 10px 12px;
+                    border: 1px solid rgba(255, 145, 77, 0.28);
+                    border-radius: 12px;
+                    background: rgba(255, 145, 77, 0.12);
+                    color: #ffd9bf;
+                    font-size: 13px;
+                }
+                .stats {
+                    display: grid;
+                    grid-template-columns: repeat(4, minmax(0, 1fr));
+                    gap: 10px;
+                }
+                .stat {
+                    padding: 12px 14px;
+                    border: 1px solid var(--line);
+                    border-radius: 14px;
+                    background: rgba(255,255,255,0.04);
+                }
+                .stat span {
+                    display: block;
+                    color: var(--muted);
+                    font-size: 11px;
+                    text-transform: uppercase;
+                    letter-spacing: 0.04em;
+                    margin-bottom: 4px;
+                }
+                .stat strong {
+                    font-size: 22px;
+                }
+                .canvas {
+                    padding: 10px;
+                    border: 1px solid var(--line);
+                    border-radius: 16px;
+                    background: var(--surface);
+                    overflow: auto;
+                    min-height: 0;
+                }
+                .double-bracket-layout {
+                    display: grid;
+                    gap: 18px;
+                }
+                .double-bracket-panel {
+                    display: grid;
+                    gap: 12px;
+                }
+                .double-bracket-heading h3,
+                .double-bracket-heading p {
+                    margin: 0;
+                }
+                .double-bracket-heading p {
+                    color: var(--muted);
+                    margin-top: 4px;
+                }
+                .bracket-svg-wrap {
+                    width: 100% !important;
+                    height: auto !important;
+                    min-width: 0 !important;
+                    display: block !important;
+                    margin: 0 auto;
+                    transform: none !important;
+                    transform-origin: top center !important;
+                }
+                .bracket-svg {
+                    display: block;
+                    width: auto !important;
+                    max-width: none !important;
+                    min-width: 0 !important;
+                    height: auto;
+                    transform: none !important;
+                    margin: 0 auto;
+                }
+                .svg-title {
+                    font-size: 18px;
+                }
+                .svg-round-title {
+                    font-size: 9px;
+                }
+                .svg-match-label {
+                    font-size: 8px;
+                }
+                .svg-slot-text,
+                .svg-seed-text,
+                .svg-champion-name {
+                    font-size: 8px;
+                }
+                .bracket-group-title,
+                .bracket-round-title,
+                .svg-title,
+                .svg-round-title,
+                .svg-match-label,
+                .svg-seed-text,
+                .svg-slot-text,
+                .svg-champion-name {
+                    fill: #f2f7ff;
+                    color: #f2f7ff;
+                }
+                .svg-match-box,
+                .svg-match-box-bye,
+                .svg-slot,
+                .svg-slot-bye,
+                .svg-seed-box,
+                .svg-champion-box {
+                    fill: rgba(11, 23, 39, 0.96);
+                    stroke: rgba(255, 145, 77, 0.55);
+                }
+                .svg-match-box-bye {
+                    fill: rgba(255, 214, 167, 0.16);
+                    stroke: rgba(255, 214, 167, 0.5);
+                }
+                .svg-slot-bye {
+                    fill: rgba(255, 214, 167, 0.12);
+                }
+                .svg-slot-text-bye {
+                    fill: #ffd6a7;
+                }
+                .svg-connector {
+                    stroke: rgba(255, 145, 77, 0.7);
+                }
+                .svg-slot-editable {
+                    cursor: pointer;
+                }
+                .svg-slot-editable:hover {
+                    fill: rgba(255, 255, 255, 0.11);
+                }
+                .svg-slot-selected {
+                    fill: rgba(255, 184, 107, 0.18);
+                    stroke: rgba(255, 184, 107, 0.45);
+                    stroke-width: 1.5;
+                }
+                .svg-slot-text-selected {
+                    fill: #ffe3c0;
+                }
+            </style>
+        </head>
+        <body>
+            <div class="shell">
+                <div class="header">
+                    <div>
+                        <h1>${escapeHtml(tournament.name || "Bracket")}</h1>
+                        <p><span class="badge">${escapeHtml(tournament.category || "-")}</span></p>
+                    </div>
+                    <p>Bracket view</p>
+                </div>
+                <div class="toolbar">
+                    <button type="button" id="popupBracketEditButton">${editLabel}</button>
+                    <button type="button" id="popupBracketSaveButton" ${saveDisabled}>Save bracket</button>
+                    <button type="button" id="popupBracketExcelButton">Export Excel</button>
+                </div>
+                <div class="status" id="popupBracketStatus" style="${bracketStatusMessage ? "" : "display:none;"}">${escapeHtml(bracketStatusMessage || "")}</div>
+                <div class="stats">
+                    <div class="stat"><span>Entries</span><strong>${summary.entries}</strong></div>
+                    <div class="stat"><span>Bracket size</span><strong>${summary.size}</strong></div>
+                    <div class="stat"><span>Byes</span><strong>${summary.byes}</strong></div>
+                    <div class="stat"><span>Rounds</span><strong>${summary.rounds}</strong></div>
+                </div>
+                <div class="canvas">${bracketMarkup}</div>
+            </div>
+            <script>
+                (function () {
+                    const canvas = document.querySelector(".canvas");
+                    const wrap = document.querySelector(".bracket-svg-wrap");
+                    const svg = document.querySelector(".bracket-svg");
+                    const editButton = document.getElementById("popupBracketEditButton");
+                    const saveButton = document.getElementById("popupBracketSaveButton");
+                    const excelButton = document.getElementById("popupBracketExcelButton");
+
+                    function getOpenerApi() {
+                        if (window.opener && window.opener.__bracketPopupApi) {
+                            return window.opener.__bracketPopupApi;
+                        }
+                        const popupStatus = document.getElementById("popupBracketStatus");
+                        if (popupStatus) {
+                            popupStatus.textContent = "The main tournament page is no longer connected to this bracket window. Please reopen the bracket.";
+                            popupStatus.style.display = "";
+                        }
+                        return null;
+                    }
+
+                    function findBracketSlotTarget(node) {
+                        let current = node;
+                        while (current) {
+                            if (current.dataset && current.dataset.bracketSlot) {
+                                return current;
+                            }
+                            current = current.parentNode;
+                        }
+                        return null;
+                    }
+
+                    if (editButton) {
+                        editButton.addEventListener("click", function () {
+                            const openerApi = getOpenerApi();
+                            if (!openerApi) {
+                                return;
+                            }
+                            openerApi.toggleEdit();
+                        });
+                    }
+
+                    if (saveButton) {
+                        saveButton.addEventListener("click", function () {
+                            const openerApi = getOpenerApi();
+                            if (!openerApi) {
+                                return;
+                            }
+                            openerApi.save();
+                        });
+                    }
+
+                    if (excelButton) {
+                        excelButton.addEventListener("click", function () {
+                            const openerApi = getOpenerApi();
+                            if (!openerApi) {
+                                return;
+                            }
+                            openerApi.exportExcel();
+                        });
+                    }
+
+                    if (!canvas || !wrap || !svg) {
+                        return;
+                    }
+
+                    function fitBracketToWindow() {
+                        const svgWidth = Number(svg.getAttribute("width")) || svg.viewBox.baseVal.width || svg.getBoundingClientRect().width;
+                        const svgHeight = Number(svg.getAttribute("height")) || svg.viewBox.baseVal.height || svg.getBoundingClientRect().height;
+                        if (!svgWidth || !svgHeight) {
+                            return;
+                        }
+
+                        const canvasStyles = window.getComputedStyle(canvas);
+                        const availableWidth = canvas.clientWidth - parseFloat(canvasStyles.paddingLeft) - parseFloat(canvasStyles.paddingRight);
+                        const availableHeight = canvas.clientHeight;
+                        const widthScale = availableWidth / svgWidth;
+                        const heightScale = availableHeight / svgHeight;
+                        const scale = Math.min(widthScale, heightScale, 1) * 0.9;
+
+                        wrap.style.width = (svgWidth * scale) + "px";
+                        wrap.style.height = (svgHeight * scale) + "px";
+                        svg.style.width = svgWidth + "px";
+                        svg.style.height = svgHeight + "px";
+                        svg.style.transform = "scale(" + scale + ")";
+                        svg.style.transformOrigin = "top center";
+                    }
+
+                    window.addEventListener("load", fitBracketToWindow);
+                    window.addEventListener("resize", fitBracketToWindow);
+                    document.addEventListener("click", function (event) {
+                        const target = findBracketSlotTarget(event.target);
+                        if (!target) {
+                            return;
+                        }
+                        const openerApi = getOpenerApi();
+                        if (!openerApi) {
+                            return;
+                        }
+
+                        openerApi.clickSlot({
+                            field: target.dataset.bracketSlot || "",
+                            sectionKey: target.dataset.bracketSection || "main",
+                            roundIndex: Number(target.dataset.roundIndex || 0),
+                            matchIndex: Number(target.dataset.matchIndex || 0),
+                        });
+                    });
+                    document.addEventListener("dblclick", function (event) {
+                        const target = findBracketSlotTarget(event.target);
+                        if (!target) {
+                            return;
+                        }
+                        const openerApi = getOpenerApi();
+                        if (!openerApi) {
+                            return;
+                        }
+
+                        const currentLabel = openerApi.getSlotLabel({
+                            field: target.dataset.bracketSlot || "",
+                            sectionKey: target.dataset.bracketSection || "main",
+                            roundIndex: Number(target.dataset.roundIndex || 0),
+                            matchIndex: Number(target.dataset.matchIndex || 0),
+                        });
+                        if (!currentLabel) {
+                            return;
+                        }
+
+                        const nextLabel = window.prompt("Edit player", currentLabel);
+                        if (nextLabel === null) {
+                            return;
+                        }
+
+                        openerApi.editSlot({
+                            field: target.dataset.bracketSlot || "",
+                            sectionKey: target.dataset.bracketSection || "main",
+                            roundIndex: Number(target.dataset.roundIndex || 0),
+                            matchIndex: Number(target.dataset.matchIndex || 0),
+                            label: nextLabel,
+                        });
+                    });
+                    fitBracketToWindow();
+                }());
+            </script>
+        </body>
+        </html>
+    `);
+    bracketWindow.document.close();
+    bracketWindow.focus();
+}
+
+function getActiveBracketPreview(tournament) {
+    if (!tournament) {
+        return null;
+    }
+
+    if (bracketEditMode && bracketDraft && tournament.id === bracketTournamentId) {
+        return bracketDraft;
+    }
+
+    return tournament.bracket || null;
+}
+
+function getBracketSummary(tournament, bracket) {
+    const players = getBracketPlayers(tournament);
+    return {
+        entries: players.length,
+        size: bracket?.size || 0,
+        byes: bracket?.byes || 0,
+        rounds: bracket?.rounds?.length || 0,
+    };
+}
+
+function refreshBracketPopup() {
+    if (!bracketPopupRef || bracketPopupRef.closed) {
+        bracketPopupRef = null;
+        return;
+    }
+
+    const currentTournament = state.tournaments.find((item) => item.id === bracketTournamentId);
+    const currentBracket = getActiveBracketPreview(currentTournament);
+    if (!currentTournament || !currentBracket) {
+        return;
+    }
+
+    openBracketWindow(currentTournament, currentBracket);
+}
+
+window.__bracketPopupApi = {
+    toggleEdit() {
+        const currentTournament = state.tournaments.find((item) => item.id === bracketTournamentId);
+        if (!currentTournament?.bracket) {
+            setBracketStatus("Generate a bracket for the selected tournament before editing it.");
+            return;
+        }
+
+        if (bracketEditMode) {
+            if (bracketDirty && !window.confirm("Discard the current unsaved bracket changes?")) {
+                return;
+            }
+
+            bracketEditMode = false;
+            bracketDirty = false;
+            bracketDraft = null;
+            selectedBracketSwapSlot = null;
+            renderBracket();
+            refreshBracketPopup();
+            setBracketStatus("Bracket edit mode closed.");
+            return;
+        }
+
+        bracketEditMode = true;
+        bracketDirty = false;
+        bracketDraft = cloneState(currentTournament.bracket);
+        selectedBracketSwapSlot = null;
+        renderBracket();
+        refreshBracketPopup();
+        setBracketStatus("Edit mode is on. Click one slot, then another slot to swap players. Save when you're done.");
+    },
+    save() {
+        const tournamentIndex = state.tournaments.findIndex((item) => item.id === bracketTournamentId);
+        if (tournamentIndex === -1 || !bracketEditMode || !bracketDraft) {
+            setBracketStatus("Nothing to save yet.");
+            return { saved: false };
+        }
+
+        if (!bracketDirty) {
+            setBracketStatus("No bracket changes to save.");
+            return { saved: false };
+        }
+
+        const savedBracket = cloneState(bracketDraft);
+        recomputeSingleEliminationProgress(savedBracket);
+        applyByeAdvancements(savedBracket);
+        syncByeAdvancementSlots(savedBracket);
+        state.tournaments[tournamentIndex].bracket = savedBracket;
+        bracketEditMode = false;
+        bracketDirty = false;
+        bracketDraft = null;
+        selectedBracketSwapSlot = null;
+        persist();
+        renderAll();
+        setBracketStatus("Bracket changes saved.");
+        return { saved: true };
+    },
+    exportExcel() {
+        const currentTournament = state.tournaments.find((item) => item.id === bracketTournamentId);
+        const currentBracket = getActiveBracketPreview(currentTournament);
+        if (!currentTournament || !currentBracket) {
+            setBracketStatus("Generate the bracket before exporting it.");
+            return;
+        }
+
+        exportBracketExcel({
+            ...currentTournament,
+            bracket: cloneState(currentBracket),
+        });
+    },
+    clickSlot(slot) {
+        if (!bracketEditMode || !bracketDraft) {
+            setBracketStatus("Click Edit bracket in the popup before swapping players.");
+            return;
+        }
+
+        const sectionBracket = getBracketEditSection(bracketDraft, slot.sectionKey);
+        if (!sectionBracket) {
+            return;
+        }
+
+        handleBracketSlotSwap(sectionBracket, slot.sectionKey, slot.field, slot.roundIndex, slot.matchIndex);
+    },
+    getSlotLabel(slot) {
+        if (!bracketEditMode || !bracketDraft) {
+            setBracketStatus("Click Edit bracket in the popup before editing a player.");
+            return "";
+        }
+
+        const sectionBracket = getBracketEditSection(bracketDraft, slot.sectionKey);
+        const match = sectionBracket?.rounds?.[slot.roundIndex]?.matches?.[slot.matchIndex];
+        if (!match) {
+            return "";
+        }
+
+        const seedField = slot.field === "slotA" ? "seedA" : "seedB";
+        if (!String(match[seedField] || "").trim()) {
+            setBracketStatus("Only seeded player slots can be edited.");
+            return "";
+        }
+
+        return String(match[slot.field] || "").trim();
+    },
+    editSlot(slot) {
+        if (!bracketEditMode || !bracketDraft) {
+            setBracketStatus("Click Edit bracket in the popup before editing a player.");
+            return;
+        }
+
+        const nextLabel = String(slot.label || "").trim();
+        if (!nextLabel) {
+            setBracketStatus("Player name cannot be empty.");
+            return;
+        }
+
+        const sectionBracket = getBracketEditSection(bracketDraft, slot.sectionKey);
+        const match = sectionBracket?.rounds?.[slot.roundIndex]?.matches?.[slot.matchIndex];
+        if (!match) {
+            return;
+        }
+
+        const seedField = slot.field === "slotA" ? "seedA" : "seedB";
+        if (!String(match[seedField] || "").trim()) {
+            setBracketStatus("Only seeded player slots can be edited.");
+            return;
+        }
+
+        match[slot.field] = nextLabel;
+        selectedBracketSwapSlot = null;
+        bracketDirty = true;
+        renderBracket();
+        refreshBracketPopup();
+        setBracketStatus("Player updated. Click Save bracket to keep the changes.");
+    },
+};
+
 function renderBracketTournamentOptions() {
     if (!elements.bracketTournamentSelect) {
         return;
@@ -1950,11 +2677,692 @@ function renderBracketTournamentOptions() {
 
     elements.bracketTournamentSelect.innerHTML = state.tournaments
         .map((item) => {
-            const label = `${item.name} - ${item.category}`;
             const selected = item.id === bracketTournamentId ? ' selected' : "";
-            return `<option value="${item.id}"${selected}>${escapeHtml(label)}</option>`;
+            return `<option value="${item.id}"${selected}>${escapeHtml(item.name)}</option>`;
         })
         .join("");
+}
+
+function renderBracketProgressTournamentOptions() {
+    if (!elements.progressTournamentSelect) {
+        return;
+    }
+
+    const eligible = state.tournaments.filter((item) => item.bracket && String(item.bracket.type || "single") === "single");
+    if (eligible.length === 0) {
+        elements.progressTournamentSelect.innerHTML = '<option value="">No saved single-elimination brackets</option>';
+        progressTournamentId = "";
+        return;
+    }
+
+    if (!progressTournamentId || !eligible.some((item) => item.id === progressTournamentId)) {
+        progressTournamentId = eligible[0].id;
+    }
+
+    elements.progressTournamentSelect.innerHTML = eligible
+        .map((item) => {
+            const selected = item.id === progressTournamentId ? ' selected' : "";
+            return `<option value="${item.id}"${selected}>${escapeHtml(item.name)}</option>`;
+        })
+        .join("");
+}
+
+function renderBracketProgress() {
+    if (!elements.progressTableBody) {
+        return;
+    }
+
+    const tournament = state.tournaments.find((item) => item.id === progressTournamentId);
+    const bracket = tournament?.bracket;
+    if (!tournament) {
+        elements.progressTableBody.innerHTML = '<tr><td colspan="8">Choose a saved tournament to enter results.</td></tr>';
+        if (elements.progressMatchRuleDisplay) {
+            elements.progressMatchRuleDisplay.value = "single_25";
+        }
+        setProgressStatus("Choose a saved tournament to enter bracket scores.");
+        return;
+    }
+
+    if (!bracket || String(bracket.type || "single") !== "single") {
+        elements.progressTableBody.innerHTML = '<tr><td colspan="8">Generate a single-elimination bracket first.</td></tr>';
+        if (elements.progressMatchRuleDisplay) {
+            elements.progressMatchRuleDisplay.value = tournament.matchRule || "single_25";
+        }
+        setProgressStatus("Generate a single-elimination bracket first.");
+        return;
+    }
+
+    const tournamentIndex = state.tournaments.findIndex((item) => item.id === progressTournamentId);
+    const autoAdvancedBracket = cloneState(bracket);
+    const autoAdvanced = applyByeAdvancements(autoAdvancedBracket);
+    if (autoAdvanced && tournamentIndex !== -1) {
+        state.tournaments[tournamentIndex].bracket = autoAdvancedBracket;
+        persist();
+        renderAll();
+        return;
+    }
+
+    const matchRule = tournament.matchRule || "single_25";
+    if (elements.progressMatchRuleDisplay) {
+        elements.progressMatchRuleDisplay.value = matchRule;
+    }
+    const headerColumns = getProgressScoreColumnCount(matchRule);
+    const colspan = 5 + headerColumns;
+    const rows = [];
+    bracket.rounds.forEach((round, roundIndex) => {
+        const roundSummary = getRoundCompletionSummary(round, matchRule);
+        rows.push(`
+            <tr class="progress-round-row">
+                <td colspan="${colspan}">
+                    <div class="progress-round-bar">
+                        <strong>${escapeHtml(getBracketRoundLabel(roundIndex, bracket.rounds.length))}</strong>
+                        <span>${escapeHtml(roundSummary)}</span>
+                    </div>
+                </td>
+            </tr>
+        `);
+        round.matches.forEach((match, matchIndex) => {
+            if (!match) {
+                return;
+            }
+            const isByeMatch = Boolean(
+                match.byeA
+                || match.byeB
+                || /^BYE$/i.test(String(match.slotA || "").trim())
+                || /^BYE$/i.test(String(match.slotB || "").trim())
+            );
+            const canScore = match.isPlayable && isBracketMatchReady(match);
+            const winnerLabel = getBracketMatchWinnerLabel(match);
+            const completed = isBracketMatchCompleted(match, matchRule);
+            const locked = isBracketMatchLocked(match, matchRule);
+            const scoreCells = renderProgressScoreCells(matchRule, match, roundIndex, matchIndex, canScore);
+            const resultSummary = isByeMatch && match.winnerSide
+                ? "BYE"
+                : (getBracketMatchResultSummary(match, matchRule) || "-");
+            const hasScores = matchRule === "best_of_3_25"
+                ? Array.isArray(match.games) && match.games.some((game) => String(game.a || "").trim() || String(game.b || "").trim())
+                : (String(match.scoreA || "").trim() || String(match.scoreB || "").trim());
+            rows.push(`
+                <tr class="${completed ? "progress-completed-row" : ""} ${completed && !locked ? "progress-editing-row" : ""} ${isByeMatch ? "progress-bye-row" : ""}">
+                    <td>${escapeHtml(match.label || "-")}</td>
+                    <td>${escapeHtml(formatProgressPlayerLabel(match.slotA, match.seedA))}</td>
+                    ${scoreCells}
+                    <td>${escapeHtml(formatProgressPlayerLabel(match.slotB, match.seedB))}</td>
+                    <td>${escapeHtml(formatProgressPlayerLabel(winnerLabel, match.winnerSide === "A" ? match.seedA : match.winnerSide === "B" ? match.seedB : "" ) || "-")}</td>
+                    <td>${escapeHtml(resultSummary)}</td>
+                    <td class="progress-action-cell">
+                        ${isByeMatch || hasScores ? "" : `<button class="button ghost" type="button" data-progress-sheet="${roundIndex}:${matchIndex}">Prep Score Sheet</button>`}
+                        ${hasScores
+                            ? (completed && locked
+                                ? `<button class="button ghost" type="button" data-progress-unlock="${roundIndex}:${matchIndex}">Unlock</button>`
+                                : `<button class="button ghost" type="button" data-progress-save="${roundIndex}:${matchIndex}" ${canScore ? "" : "disabled"}>${completed ? "Update" : "Save"}</button>`)
+                            : ""}
+                    </td>
+                </tr>
+            `);
+        });
+    });
+
+    const header = elements.progressTableBody.closest("table")?.querySelector("thead tr");
+    if (header) {
+        header.innerHTML = matchRule === "best_of_3_25"
+            ? `
+                <th>Match</th>
+                <th>Player A</th>
+                <th>S1A</th>
+                <th>vs</th>
+                <th>S1B</th>
+                <th>S2A</th>
+                <th>vs</th>
+                <th>S2B</th>
+                <th>S3A</th>
+                <th>vs</th>
+                <th>S3B</th>
+                <th>Player B</th>
+                <th>Winner</th>
+                <th>Result</th>
+                <th>Action</th>
+            `
+            : `
+                <th>Match</th>
+                <th>Player A</th>
+                <th>S1A</th>
+                <th>vs</th>
+                <th>S1B</th>
+                <th>Player B</th>
+                <th>Winner</th>
+                <th>Result</th>
+                <th>Action</th>
+            `;
+    }
+
+    elements.progressTableBody.innerHTML = rows.length > 0
+        ? rows.join("")
+        : `<tr><td colspan="${colspan}">No bracket matches available yet.</td></tr>`;
+    setProgressStatus(matchRule === "best_of_3_25"
+        ? "Match rule: Best of 3 (25). Enter game scores up to 25 points. First player to win 2 games advances."
+        : "Match rule: Single game (25). Enter one score pair up to 25 points. Higher score advances.");
+}
+
+function getProgressScoreColumnCount(matchRule) {
+    return matchRule === "best_of_3_25" ? 9 : 3;
+}
+
+function formatProgressPlayerLabel(label, seed) {
+    const text = String(label || "").trim();
+    const seedText = String(seed || "").trim();
+    if (!text) {
+        return "-";
+    }
+    return seedText ? `[${seedText}] ${text}` : text;
+}
+
+function getMatchRuleLabel(matchRule) {
+    return matchRule === "best_of_3_25" ? "Best of 3 (25)" : "Single game (25)";
+}
+
+function renderProgressScoreCells(matchRule, match, roundIndex, matchIndex, canScore) {
+    const completed = isBracketMatchCompleted(match, matchRule);
+    const locked = isBracketMatchLocked(match, matchRule);
+    const disabled = canScore && (!completed || !locked) ? "" : "disabled";
+    if (!canScore) {
+        if (matchRule === "best_of_3_25") {
+            return [
+                `<td class="progress-bye-cell">-</td>`,
+                `<td class="score-divider-cell">vs</td>`,
+                `<td class="progress-bye-cell">-</td>`,
+                `<td class="progress-bye-cell">-</td>`,
+                `<td class="score-divider-cell">vs</td>`,
+                `<td class="progress-bye-cell">-</td>`,
+                `<td class="progress-bye-cell">-</td>`,
+                `<td class="score-divider-cell">vs</td>`,
+                `<td class="progress-bye-cell">-</td>`
+            ].join("");
+        }
+        return [
+            `<td class="progress-bye-cell">-</td>`,
+            `<td class="score-divider-cell">vs</td>`,
+            `<td class="progress-bye-cell">-</td>`
+        ].join("");
+    }
+    if (matchRule === "best_of_3_25") {
+        const games = Array.isArray(match.games) && match.games.length === 3
+            ? match.games
+            : [{ a: "", b: "" }, { a: "", b: "" }, { a: "", b: "" }];
+        return games.map((game, gameIndex) => `
+            <td><input class="score-input" type="number" min="0" max="25" data-progress-match="${roundIndex}:${matchIndex}:G${gameIndex}:A" value="${escapeHtml(String(game.a || ""))}" ${disabled}></td>
+            <td class="score-divider-cell">vs</td>
+            <td><input class="score-input" type="number" min="0" max="25" data-progress-match="${roundIndex}:${matchIndex}:G${gameIndex}:B" value="${escapeHtml(String(game.b || ""))}" ${disabled}></td>
+        `).join("");
+    }
+
+    return `
+        <td><input class="score-input" type="number" min="0" max="25" data-progress-match="${roundIndex}:${matchIndex}:A" value="${escapeHtml(String(match.scoreA || ""))}" ${disabled}></td>
+        <td class="score-divider-cell">vs</td>
+        <td><input class="score-input" type="number" min="0" max="25" data-progress-match="${roundIndex}:${matchIndex}:B" value="${escapeHtml(String(match.scoreB || ""))}" ${disabled}></td>
+    `;
+}
+
+function openProgressScoreSheet(key) {
+    const [roundIndexText, matchIndexText] = String(key || "").split(":");
+    const roundIndex = Number(roundIndexText);
+    const matchIndex = Number(matchIndexText);
+    const tournament = state.tournaments.find((item) => item.id === progressTournamentId);
+    const bracket = tournament?.bracket;
+    if (!tournament || !bracket) {
+        return;
+    }
+    const match = bracket.rounds?.[roundIndex]?.matches?.[matchIndex];
+    if (!match) {
+        return;
+    }
+    const matchRule = tournament.matchRule || "single_25";
+    const title = `${tournament.name} - ${tournament.category} - ${match.label || "Match"}`;
+    const sheetWindow = window.open("", "bracket-score-sheet", "width=900,height=700,resizable=yes,scrollbars=yes");
+    if (!sheetWindow) {
+        setProgressStatus("The score sheet window was blocked. Please allow pop-ups for this page.");
+        return;
+    }
+    const playerA = formatProgressPlayerLabel(match.slotA, match.seedA);
+    const playerB = formatProgressPlayerLabel(match.slotB, match.seedB);
+    const isBestOf3 = matchRule === "best_of_3_25";
+    const scoreRows = isBestOf3
+        ? [1, 2, 3]
+        : [1];
+    sheetWindow.document.open();
+    sheetWindow.document.write(`
+        <!doctype html>
+        <html lang="en">
+        <head>
+            <meta charset="utf-8">
+            <title>${escapeHtml(title)} - Score Sheet</title>
+            <style>
+                :root { color-scheme: light; }
+                body { margin: 0; font-family: "Segoe UI", Arial, sans-serif; padding: 24px; background: #f6f7fb; color: #111827; }
+                .card { background: #ffffff; border: 1px solid #d9dde7; border-radius: 16px; padding: 20px; max-width: 820px; margin: 0 auto; }
+                h1 { font-size: 20px; margin: 0 0 6px; }
+                .meta { color: #4b5563; font-size: 13px; margin-bottom: 16px; }
+                .players { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 18px; }
+                .player-box { border: 1px solid #e1e5ee; border-radius: 12px; padding: 12px 14px; }
+                .player-box strong { display: block; margin-bottom: 6px; font-size: 14px; }
+                table { width: 100%; border-collapse: collapse; margin-bottom: 18px; }
+                th, td { border: 1px solid #e1e5ee; padding: 10px; text-align: center; font-size: 13px; }
+                th { background: #f3f4f6; text-transform: uppercase; letter-spacing: 0.04em; font-size: 12px; }
+                .notes { border: 1px dashed #cbd5e1; border-radius: 12px; padding: 12px; min-height: 80px; }
+                .footer { margin-top: 16px; color: #6b7280; font-size: 12px; }
+                @media print {
+                    body { background: #ffffff; padding: 0; }
+                    .card { border: 0; border-radius: 0; }
+                }
+            </style>
+        </head>
+        <body>
+            <div class="card">
+                <h1>${escapeHtml(title)}</h1>
+                <div class="meta">${escapeHtml(getBracketRoundLabel(roundIndex, bracket.rounds.length))} • ${escapeHtml(match.label || "Match")} • ${escapeHtml(getMatchRuleLabel(matchRule))}</div>
+                <div class="players">
+                    <div class="player-box"><strong>Player A</strong>${escapeHtml(playerA)}</div>
+                    <div class="player-box"><strong>Player B</strong>${escapeHtml(playerB)}</div>
+                </div>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Set</th>
+                            <th>${escapeHtml(playerA)}</th>
+                            <th>${escapeHtml(playerB)}</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${scoreRows.map((set) => `
+                            <tr>
+                                <td>${isBestOf3 ? `S${set}` : "S1"}</td>
+                                <td></td>
+                                <td></td>
+                            </tr>
+                        `).join("")}
+                    </tbody>
+                </table>
+                <div class="notes">Notes</div>
+                <div class="footer">Prepared from Bracket Progress</div>
+            </div>
+        </body>
+        </html>
+    `);
+    sheetWindow.document.close();
+    sheetWindow.focus();
+}
+
+function isBracketMatchCompleted(match, matchRule) {
+    if (!match) {
+        return false;
+    }
+    if (!match.isPlayable && match.winnerSide) {
+        return true;
+    }
+    if (matchRule === "best_of_3_25") {
+        return Boolean(match.winnerSide && getBracketMatchResultSummary(match, matchRule));
+    }
+    return Boolean(match.winnerSide && match.scoreA !== "" && match.scoreB !== "");
+}
+
+function isBracketMatchLocked(match, matchRule) {
+    if (!isBracketMatchCompleted(match, matchRule)) {
+        return false;
+    }
+    return match.locked !== false;
+}
+
+function getBracketMatchResultSummary(match, matchRule) {
+    if (!match?.winnerSide) {
+        return "";
+    }
+    if (matchRule === "best_of_3_25") {
+        const games = Array.isArray(match.games) ? match.games : [];
+        let winsA = 0;
+        let winsB = 0;
+        games.forEach((game) => {
+            const a = Number(game?.a);
+            const b = Number(game?.b);
+            if (!Number.isFinite(a) || !Number.isFinite(b) || game?.a === "" || game?.b === "") {
+                return;
+            }
+            if (a > b) {
+                winsA += 1;
+            } else if (b > a) {
+                winsB += 1;
+            }
+        });
+        return `${winsA}-${winsB}`;
+    }
+    return `${match.scoreA}-${match.scoreB}`;
+}
+
+function getRoundCompletionSummary(round, matchRule) {
+    const playableMatches = Array.isArray(round?.matches) ? round.matches.filter((match) => match.isPlayable) : [];
+    if (playableMatches.length === 0) {
+        return "No playable matches";
+    }
+    const completed = playableMatches.filter((match) => isBracketMatchCompleted(match, matchRule)).length;
+    return `${completed}/${playableMatches.length} completed`;
+}
+
+function isBracketMatchReady(match) {
+    if (!match?.isPlayable) {
+        return false;
+    }
+    if (String(match.slotA || "").startsWith("Winner of ")) {
+        return false;
+    }
+    if (String(match.slotB || "").startsWith("Winner of ")) {
+        return false;
+    }
+    return Boolean(String(match.slotA || "").trim() && String(match.slotB || "").trim());
+}
+
+function getBracketMatchWinnerLabel(match) {
+    if (!match || !match.winnerSide) {
+        return "";
+    }
+    return match.winnerSide === "A" ? String(match.slotA || "") : String(match.slotB || "");
+}
+
+function saveBracketProgressResult(key) {
+    const [roundIndexText, matchIndexText] = String(key || "").split(":");
+    const roundIndex = Number(roundIndexText);
+    const matchIndex = Number(matchIndexText);
+    const tournamentIndex = state.tournaments.findIndex((item) => item.id === progressTournamentId);
+    if (tournamentIndex === -1) {
+        return;
+    }
+
+    const tournament = state.tournaments[tournamentIndex];
+    const bracket = cloneState(tournament.bracket);
+    const match = bracket?.rounds?.[roundIndex]?.matches?.[matchIndex];
+    const matchRule = tournament.matchRule || "single_25";
+    if (!match || !isBracketMatchReady(match)) {
+        setProgressStatus("That match is not ready for score entry yet.");
+        return;
+    }
+
+    const scoreResult = matchRule === "best_of_3_25"
+        ? getBestOfThreeResult(roundIndex, matchIndex)
+        : getSingleGameResult(roundIndex, matchIndex);
+    if (!scoreResult.ok) {
+        setProgressStatus(scoreResult.message);
+        return;
+    }
+
+    match.scoreA = scoreResult.scoreA;
+    match.scoreB = scoreResult.scoreB;
+    match.games = scoreResult.games;
+    match.winnerSide = scoreResult.winnerSide;
+    match.locked = true;
+    recomputeSingleEliminationProgress(bracket);
+
+    state.tournaments[tournamentIndex].bracket = bracket;
+    persist();
+    renderAll();
+    const updatedMatch = state.tournaments[tournamentIndex].bracket.rounds?.[roundIndex]?.matches?.[matchIndex];
+    setProgressStatus(`Saved ${updatedMatch?.label || "match"} and updated the next round pairing.`);
+}
+
+function unlockBracketProgressResult(key) {
+    const [roundIndexText, matchIndexText] = String(key || "").split(":");
+    const roundIndex = Number(roundIndexText);
+    const matchIndex = Number(matchIndexText);
+    const tournamentIndex = state.tournaments.findIndex((item) => item.id === progressTournamentId);
+    if (tournamentIndex === -1) {
+        return;
+    }
+
+    const tournament = state.tournaments[tournamentIndex];
+    const bracket = cloneState(tournament.bracket);
+    const match = bracket?.rounds?.[roundIndex]?.matches?.[matchIndex];
+    const matchRule = tournament.matchRule || "single_25";
+    if (!match || !isBracketMatchCompleted(match, matchRule)) {
+        return;
+    }
+
+    match.locked = false;
+    state.tournaments[tournamentIndex].bracket = bracket;
+    persist();
+    renderAll();
+    setProgressStatus(`Unlocked ${match.label || "match"} for correction.`);
+}
+
+function recomputeSingleEliminationProgress(bracket) {
+    if (!bracket || String(bracket.type || "single") !== "single") {
+        return;
+    }
+
+    for (let roundIndex = 1; roundIndex < bracket.rounds.length; roundIndex += 1) {
+        const round = bracket.rounds[roundIndex];
+        round.matches.forEach((match) => {
+            const sourceA = getBracketMatchSourceLabel(match.sourceA, match.slotA);
+            const sourceB = getBracketMatchSourceLabel(match.sourceB, match.slotB);
+            const nextA = resolveBracketSourceWinner(bracket, sourceA);
+            const nextB = resolveBracketSourceWinner(bracket, sourceB);
+            const previousSlots = `${match.slotA}||${match.slotB}`;
+
+            if (sourceA) {
+                match.sourceA = sourceA;
+                match.slotA = nextA ? nextA.label : `Winner of ${sourceA}`;
+                match.seedA = nextA ? nextA.seed : "";
+            }
+            if (sourceB) {
+                match.sourceB = sourceB;
+                match.slotB = nextB ? nextB.label : `Winner of ${sourceB}`;
+                match.seedB = nextB ? nextB.seed : "";
+            }
+
+            const currentSlots = `${match.slotA}||${match.slotB}`;
+            const ready = isBracketMatchReady(match);
+            if (!ready || previousSlots !== currentSlots) {
+                match.scoreA = "";
+                match.scoreB = "";
+                match.games = [{ a: "", b: "" }, { a: "", b: "" }, { a: "", b: "" }];
+                match.winnerSide = "";
+                match.locked = false;
+            }
+        });
+    }
+}
+
+function applyByeAdvancements(bracket) {
+    if (!bracket || String(bracket.type || "single") !== "single") {
+        return false;
+    }
+
+    let updated = false;
+    bracket.rounds.forEach((round) => {
+        round.matches.forEach((match) => {
+            if (!match || match.isPlayable || match.winnerSide) {
+                return;
+            }
+
+            const hasPlayableA = String(match.slotA || "").trim() && !/^BYE$/i.test(String(match.slotA || "").trim());
+            const hasPlayableB = String(match.slotB || "").trim() && !/^BYE$/i.test(String(match.slotB || "").trim());
+            if (hasPlayableA && !hasPlayableB) {
+                match.winnerSide = "A";
+                match.locked = true;
+                updated = true;
+                return;
+            }
+            if (hasPlayableB && !hasPlayableA) {
+                match.winnerSide = "B";
+                match.locked = true;
+                updated = true;
+            }
+        });
+    });
+
+    if (updated) {
+        syncByeAdvancementSlots(bracket);
+        recomputeSingleEliminationProgress(bracket);
+    }
+
+    return updated;
+}
+
+function syncByeAdvancementSlots(bracket) {
+    if (!bracket || String(bracket.type || "single") !== "single") {
+        return;
+    }
+    for (let roundIndex = 0; roundIndex < bracket.rounds.length - 1; roundIndex += 1) {
+        const round = bracket.rounds[roundIndex];
+        const nextRound = bracket.rounds[roundIndex + 1];
+        if (!nextRound) {
+            continue;
+        }
+        round.matches.forEach((match, matchIndex) => {
+            if (!match || match.isPlayable || !match.winnerSide) {
+                return;
+            }
+            const winnerLabel = getBracketMatchWinnerLabel(match);
+            if (!winnerLabel) {
+                return;
+            }
+            const targetMatchIndex = Math.floor(matchIndex / 2);
+            const targetMatch = nextRound.matches?.[targetMatchIndex];
+            if (!targetMatch) {
+                return;
+            }
+            const targetSide = matchIndex % 2 === 0 ? "A" : "B";
+            const slotField = targetSide === "A" ? "slotA" : "slotB";
+            const seedField = targetSide === "A" ? "seedA" : "seedB";
+            const sourceField = targetSide === "A" ? "sourceA" : "sourceB";
+            const winnerSeed = match.winnerSide === "A" ? match.seedA : match.seedB;
+            targetMatch[slotField] = winnerLabel;
+            targetMatch[seedField] = winnerSeed || "";
+            targetMatch[sourceField] = match.label || "";
+        });
+    }
+}
+
+function ensureByeAdvancements(tournament, bracket) {
+    if (!tournament || !bracket || String(bracket.type || "single") !== "single") {
+        return { bracket, updated: false };
+    }
+    const preview = cloneState(bracket);
+    const updated = applyByeAdvancements(preview);
+    if (updated && !bracketEditMode) {
+        const tournamentIndex = state.tournaments.findIndex((item) => item.id === tournament.id);
+        if (tournamentIndex !== -1) {
+            state.tournaments[tournamentIndex].bracket = preview;
+            persist();
+        }
+    }
+    return { bracket: preview, updated };
+}
+
+function getBracketMatchSourceLabel(sourceLabel, slotLabel) {
+    const explicit = String(sourceLabel || "").trim();
+    if (explicit) {
+        return explicit;
+    }
+
+    const inferred = String(slotLabel || "").trim().match(/^Winner of (Match \d+)$/i);
+    return inferred ? inferred[1] : "";
+}
+
+function getSingleGameResult(roundIndex, matchIndex) {
+    const scoreAInput = elements.progressTableBody.querySelector(`[data-progress-match="${roundIndex}:${matchIndex}:A"]`);
+    const scoreBInput = elements.progressTableBody.querySelector(`[data-progress-match="${roundIndex}:${matchIndex}:B"]`);
+    const scoreA = scoreAInput ? scoreAInput.value.trim() : "";
+    const scoreB = scoreBInput ? scoreBInput.value.trim() : "";
+
+    if (scoreA === "" || scoreB === "") {
+        return { ok: false, message: "Enter both scores before saving a match." };
+    }
+
+    const numericA = Number(scoreA);
+    const numericB = Number(scoreB);
+    if (!Number.isFinite(numericA) || !Number.isFinite(numericB) || numericA < 0 || numericB < 0 || numericA > 25 || numericB > 25) {
+        return { ok: false, message: "Scores must be between 0 and 25." };
+    }
+    if (numericA === numericB) {
+        return { ok: false, message: "Scores cannot be tied in a knockout bracket." };
+    }
+
+    return {
+        ok: true,
+        scoreA: String(numericA),
+        scoreB: String(numericB),
+        games: [{ a: String(numericA), b: String(numericB) }, { a: "", b: "" }, { a: "", b: "" }],
+        winnerSide: numericA > numericB ? "A" : "B",
+    };
+}
+
+function getBestOfThreeResult(roundIndex, matchIndex) {
+    const games = [];
+    let winsA = 0;
+    let winsB = 0;
+
+    for (let gameIndex = 0; gameIndex < 3; gameIndex += 1) {
+        const inputA = elements.progressTableBody.querySelector(`[data-progress-match="${roundIndex}:${matchIndex}:G${gameIndex}:A"]`);
+        const inputB = elements.progressTableBody.querySelector(`[data-progress-match="${roundIndex}:${matchIndex}:G${gameIndex}:B"]`);
+        const rawA = inputA ? inputA.value.trim() : "";
+        const rawB = inputB ? inputB.value.trim() : "";
+
+        if (!rawA && !rawB) {
+            games.push({ a: "", b: "" });
+            continue;
+        }
+        if (!rawA || !rawB) {
+            return { ok: false, message: `Enter both scores for Game ${gameIndex + 1}.` };
+        }
+
+        const scoreA = Number(rawA);
+        const scoreB = Number(rawB);
+        if (!Number.isFinite(scoreA) || !Number.isFinite(scoreB) || scoreA < 0 || scoreB < 0 || scoreA > 25 || scoreB > 25) {
+            return { ok: false, message: `Game ${gameIndex + 1} scores must be between 0 and 25.` };
+        }
+        if (scoreA === scoreB) {
+            return { ok: false, message: `Game ${gameIndex + 1} cannot end in a tie.` };
+        }
+
+        if (scoreA > scoreB) {
+            winsA += 1;
+        } else {
+            winsB += 1;
+        }
+        games.push({ a: String(scoreA), b: String(scoreB) });
+    }
+
+    if (winsA < 2 && winsB < 2) {
+        return { ok: false, message: "Enter enough game scores for one player to win 2 games." };
+    }
+
+    const playedGames = games.filter((game) => game.a !== "" && game.b !== "");
+    const totalA = playedGames.reduce((sum, game) => sum + Number(game.a || 0), 0);
+    const totalB = playedGames.reduce((sum, game) => sum + Number(game.b || 0), 0);
+
+    return {
+        ok: true,
+        scoreA: String(totalA),
+        scoreB: String(totalB),
+        games,
+        winnerSide: winsA > winsB ? "A" : "B",
+    };
+}
+
+function resolveBracketSourceWinner(bracket, sourceLabel) {
+    if (!sourceLabel) {
+        return null;
+    }
+
+    for (const round of bracket.rounds) {
+        for (const match of round.matches) {
+            if (match.label !== sourceLabel || !match.winnerSide) {
+                continue;
+            }
+            return match.winnerSide === "A"
+                ? { label: match.slotA, seed: match.seedA }
+                : { label: match.slotB, seed: match.seedB };
+        }
+    }
+
+    return null;
 }
 
 function renderBracket() {
@@ -1975,7 +3383,7 @@ function renderBracket() {
 
     const currentTournament = state.tournaments.find((item) => item.id === bracketTournamentId);
     const bracketPlayers = getBracketPlayers(currentTournament);
-    const bracket = bracketEditMode && bracketDraft && currentTournament?.id === bracketTournamentId
+    let bracket = bracketEditMode && bracketDraft && currentTournament?.id === bracketTournamentId
         ? bracketDraft
         : (currentTournament?.bracket || null);
 
@@ -1997,6 +3405,8 @@ function renderBracket() {
     }
 
     try {
+        const preview = ensureByeAdvancements(currentTournament, bracket);
+        bracket = preview.bracket || bracket;
         setBracketStatus(`Showing bracket for ${currentTournament.name} - ${currentTournament.category}.`);
         elements.bracketRounds.innerHTML = renderBracketMarkup(bracket, currentTournament);
         bindBracketSvgEditing();
@@ -2106,11 +3516,15 @@ function renderMirroredSingleEliminationBracket(bracket, tournament) {
         const bottomMidY = bottomSlotY + layout.slotHeight / 2;
         const mergeMidY = (topMidY + bottomMidY) / 2;
 
+        const finalIsBye = Boolean(finalMatch.byeA || finalMatch.byeB);
+        const finalMatchClass = finalMatch.isPlayable
+            ? `svg-match-box${finalIsBye ? " svg-match-box-bye" : ""}`
+            : `svg-match-box svg-match-box-auto${finalIsBye ? " svg-match-box-bye" : ""}`;
         parts.push(
-            `<rect x="${finalBox.x}" y="${finalBox.y}" width="${finalBox.width}" height="${finalBox.height}" rx="18" class="svg-match-box"></rect>`,
-            `<text x="${finalBox.x + 14}" y="${finalBox.y + 18}" class="svg-match-label">${escapeXml(finalMatch.displayLabel || finalMatch.label)}</text>`,
-            renderSvgSlot(finalBox.x + 12, topSlotY, layout, finalMatch.seedA, getCompactBracketSlotLabel(finalMatch.slotA), finalMatch.byeA, bracket.rounds.length - 1, 0, "slotA", "main"),
-            renderSvgSlot(finalBox.x + 12, bottomSlotY, layout, finalMatch.seedB, getCompactBracketSlotLabel(finalMatch.slotB), finalMatch.byeB, bracket.rounds.length - 1, 0, "slotB", "main")
+        `<rect x="${finalBox.x}" y="${finalBox.y}" width="${finalBox.width}" height="${finalBox.height}" rx="18" class="${finalMatchClass}"></rect>`,
+        `<text x="${finalBox.x + 14}" y="${finalBox.y + 18}" class="${finalMatch.isPlayable ? "svg-match-label" : "svg-match-label svg-match-label-auto"}">${escapeXml(finalMatch.displayLabel || finalMatch.label)}</text>`,
+        renderSvgSlot(finalBox.x + 12, topSlotY, layout, finalMatch.seedA, getCompactBracketSlotLabel(finalMatch.slotA), finalMatch.byeA, bracket.rounds.length - 1, 0, "slotA", "main"),
+        renderSvgSlot(finalBox.x + 12, bottomSlotY, layout, finalMatch.seedB, getCompactBracketSlotLabel(finalMatch.slotB), finalMatch.byeB, bracket.rounds.length - 1, 0, "slotB", "main")
         );
 
         const leftSemi = getMirroredMatchBox(layout, sideRounds.length - 1, 0, "left");
@@ -2153,13 +3567,13 @@ function renderMirroredBracketMatch(parts, layout, options) {
     const bottomMidY = bottomSlotY + layout.slotHeight / 2;
     const mergeMidY = (topMidY + bottomMidY) / 2;
 
-    if (!match.isPlayable) {
-        return;
-    }
-
+    const isByeMatch = Boolean(match.byeA || match.byeB);
+    const matchClass = match.isPlayable
+        ? `svg-match-box${isByeMatch ? " svg-match-box-bye" : ""}`
+        : `svg-match-box svg-match-box-auto${isByeMatch ? " svg-match-box-bye" : ""}`;
     parts.push(
-        `<rect x="${matchBox.x}" y="${matchBox.y}" width="${matchBox.width}" height="${matchBox.height}" rx="18" class="svg-match-box"></rect>`,
-        `<text x="${matchBox.x + 14}" y="${matchBox.y + 18}" class="svg-match-label">${escapeXml(match.displayLabel || match.label)}</text>`,
+        `<rect x="${matchBox.x}" y="${matchBox.y}" width="${matchBox.width}" height="${matchBox.height}" rx="18" class="${matchClass}"></rect>`,
+        `<text x="${matchBox.x + 14}" y="${matchBox.y + 18}" class="${match.isPlayable ? "svg-match-label" : "svg-match-label svg-match-label-auto"}">${escapeXml(match.displayLabel || match.label)}</text>`,
         renderSvgSlot(matchBox.x + 12, topSlotY, layout, match.seedA, getCompactBracketSlotLabel(match.slotA), match.byeA, roundIndex, matchIndex, "slotA", sectionKey),
         renderSvgSlot(matchBox.x + 12, bottomSlotY, layout, match.seedB, getCompactBracketSlotLabel(match.slotB), match.byeB, roundIndex, matchIndex, "slotB", sectionKey)
     );
@@ -2286,6 +3700,57 @@ function getCompactBracketSlotLabel(label) {
     return `${text.slice(0, maxLength - 1).trim()}…`;
 }
 
+function getBracketSlotLines(label, bye) {
+    const raw = String(label || "").trim() || "TBD";
+    const cleaned = compactBracketReferenceLabel(raw.replace(/\s*\(BYE\)\s*$/i, "").trim());
+    const separatorIndex = cleaned.indexOf(" - ");
+    const primary = trimBracketSlotSegment(
+        separatorIndex === -1 ? cleaned : cleaned.slice(0, separatorIndex),
+        16
+    );
+    const secondaryBase = separatorIndex === -1 ? "" : trimBracketSlotSegment(cleaned.slice(separatorIndex + 3), 12);
+    const secondary = secondaryBase;
+
+    return {
+        primary: primary || "TBD",
+        secondary,
+    };
+}
+
+function trimBracketSlotSegment(value, maxLength) {
+    const text = String(value || "").trim();
+    if (!text) {
+        return "";
+    }
+
+    if (text.length <= maxLength) {
+        return text;
+    }
+
+    return `${text.slice(0, maxLength - 3).trim()}...`;
+}
+
+function compactBracketReferenceLabel(value) {
+    const text = String(value || "").trim();
+    if (!text) {
+        return "";
+    }
+
+    const winnerMatch = text.match(/^Winner of Match\s+(\d+)$/i);
+    if (winnerMatch) {
+        return `W-M${winnerMatch[1]}`;
+    }
+
+    const loserMatch = text.match(/^Loser of Match\s+(\d+)$/i);
+    if (loserMatch) {
+        return `L-M${loserMatch[1]}`;
+    }
+
+    return text
+        .replace(/^Winner of\s+/i, "W-")
+        .replace(/^Loser of\s+/i, "L-");
+}
+
 function getMirroredMatchBox(layout, roundIndex, matchIndex, side) {
     const step = layout.baseStep * (2 ** roundIndex);
     const centerY = layout.firstCenterY + ((2 ** roundIndex) - 1) * layout.baseStep / 2 + matchIndex * step;
@@ -2369,10 +3834,29 @@ function handleBracketSlotSwap(bracket, sectionKey, field, roundIndex, matchInde
     if (!currentMatch) {
         return;
     }
+    const currentSeedField = field === "slotA" ? "seedA" : "seedB";
+    const currentSeed = String(currentMatch[currentSeedField] || "").trim();
+
+    if (!currentSeed) {
+        selectedBracketSwapSlot = null;
+        renderBracket();
+        refreshBracketPopup();
+        setBracketStatus("Only seeded player slots can be swapped.");
+        return;
+    }
+
+    if (roundIndex !== 0) {
+        selectedBracketSwapSlot = null;
+        renderBracket();
+        refreshBracketPopup();
+        setBracketStatus("Swaps are only allowed within the first round.");
+        return;
+    }
 
     if (!selectedBracketSwapSlot) {
         selectedBracketSwapSlot = currentSlot;
         renderBracket();
+        refreshBracketPopup();
         setBracketStatus(`First slot selected for swap: ${currentMatch.displayLabel || currentMatch.label}. Choose the second slot.`);
         return;
     }
@@ -2385,6 +3869,7 @@ function handleBracketSlotSwap(bracket, sectionKey, field, roundIndex, matchInde
     ) {
         selectedBracketSwapSlot = null;
         renderBracket();
+        refreshBracketPopup();
         setBracketStatus("Swap selection cleared.");
         return;
     }
@@ -2393,6 +3878,15 @@ function handleBracketSlotSwap(bracket, sectionKey, field, roundIndex, matchInde
         setBracketStatus("Please swap players within the same bracket section.");
         selectedBracketSwapSlot = null;
         renderBracket();
+        refreshBracketPopup();
+        return;
+    }
+
+    if (selectedBracketSwapSlot.roundIndex !== 0 || selectedBracketSwapSlot.roundIndex !== roundIndex) {
+        setBracketStatus("Swaps must stay inside the first round.");
+        selectedBracketSwapSlot = null;
+        renderBracket();
+        refreshBracketPopup();
         return;
     }
 
@@ -2400,6 +3894,7 @@ function handleBracketSlotSwap(bracket, sectionKey, field, roundIndex, matchInde
     if (!firstMatch) {
         selectedBracketSwapSlot = null;
         renderBracket();
+        refreshBracketPopup();
         return;
     }
 
@@ -2413,6 +3908,14 @@ function handleBracketSlotSwap(bracket, sectionKey, field, roundIndex, matchInde
     const firstBye = Boolean(firstMatch[firstByeField]);
     const firstSeed = firstMatch[firstSeedField];
 
+    if (!String(firstSeed || "").trim()) {
+        selectedBracketSwapSlot = null;
+        renderBracket();
+        refreshBracketPopup();
+        setBracketStatus("Only seeded player slots can be swapped.");
+        return;
+    }
+
     firstMatch[firstField] = currentMatch[field];
     firstMatch[firstByeField] = Boolean(currentMatch[secondByeField]);
     firstMatch[firstSeedField] = currentMatch[secondSeedField];
@@ -2420,9 +3923,13 @@ function handleBracketSlotSwap(bracket, sectionKey, field, roundIndex, matchInde
     currentMatch[secondByeField] = firstBye;
     currentMatch[secondSeedField] = firstSeed;
 
+    recomputeSingleEliminationProgress(bracket);
+    applyByeAdvancements(bracket);
+    syncByeAdvancementSlots(bracket);
     bracketDirty = true;
     selectedBracketSwapSlot = null;
     renderBracket();
+    refreshBracketPopup();
     setBracketStatus("Players swapped. Review the bracket and click Save bracket to keep the changes.");
 }
 
@@ -2666,6 +4173,9 @@ function renderStandingsCategoryOptions() {
 }
 
 function renderAnnouncements() {
+    if (!elements.announcementsList || !elements.announcementTemplate) {
+        return;
+    }
     elements.announcementsList.innerHTML = "";
     if (state.announcements.length === 0) {
         elements.announcementsList.innerHTML = '<div class="empty-state">No announcements posted yet.</div>';
@@ -2682,6 +4192,13 @@ function renderAnnouncements() {
         });
         elements.announcementsList.appendChild(fragment);
     });
+}
+
+function setProgressStatus(message) {
+    if (elements.progressStatus) {
+        elements.progressStatus.textContent = message || "";
+        elements.progressStatus.style.display = message ? "" : "none";
+    }
 }
 
 function renderDetectedCategories() {
@@ -2763,8 +4280,13 @@ function setTournamentModeStatus(message) {
 }
 
 function setBracketStatus(message) {
-    if (elements.bracketStatus) {
-        elements.bracketStatus.textContent = message;
+    bracketStatusMessage = message || "";
+    if (bracketPopupRef && !bracketPopupRef.closed) {
+        const popupStatus = bracketPopupRef.document.getElementById("popupBracketStatus");
+        if (popupStatus) {
+            popupStatus.textContent = bracketStatusMessage;
+            popupStatus.style.display = bracketStatusMessage ? "" : "none";
+        }
     }
 }
 
@@ -2815,16 +4337,18 @@ function loadState() {
         const parsed = JSON.parse(raw);
         return {
             tournament: {
-                name: parsed.tournament?.name || "",
+                name: formatTournamentName(parsed.tournament?.name || "", parsed.tournament?.category || ""),
                 format: parsed.tournament?.format || "League",
+                matchRule: parsed.tournament?.matchRule || "single_25",
                 category: parsed.tournament?.category || "",
                 notes: parsed.tournament?.notes || "",
             },
             tournaments: Array.isArray(parsed.tournaments)
                 ? parsed.tournaments.map((item) => ({
                     id: item.id || createId(),
-                    name: item.name || "",
+                    name: formatTournamentName(item.name || "", item.category || ""),
                     format: item.format || "League",
+                    matchRule: item.matchRule || "single_25",
                     category: item.category || "",
                     notes: item.notes || "",
                     playerCount: Number(item.playerCount || 0),
@@ -2858,19 +4382,19 @@ function normalizeBracketState(bracket) {
             winners: {
                 size: Number(bracket.winners?.size || 0),
                 byes: Number(bracket.winners?.byes || 0),
-                rounds: Array.isArray(bracket.winners?.rounds) ? cloneState(bracket.winners.rounds) : [],
+                rounds: normalizeBracketRounds(bracket.winners?.rounds),
             },
             losers: {
                 size: Number(bracket.losers?.size || 0),
                 byes: Number(bracket.losers?.byes || 0),
-                rounds: Array.isArray(bracket.losers?.rounds) ? cloneState(bracket.losers.rounds) : [],
+                rounds: normalizeBracketRounds(bracket.losers?.rounds),
             },
             finals: {
                 size: Number(bracket.finals?.size || 0),
                 byes: Number(bracket.finals?.byes || 0),
-                rounds: Array.isArray(bracket.finals?.rounds) ? cloneState(bracket.finals.rounds) : [],
+                rounds: normalizeBracketRounds(bracket.finals?.rounds),
             },
-            rounds: Array.isArray(bracket.rounds) ? cloneState(bracket.rounds) : [],
+            rounds: normalizeBracketRounds(bracket.rounds),
             nextMatchSequence: Number(bracket.nextMatchSequence || 1),
         };
     }
@@ -2879,9 +4403,31 @@ function normalizeBracketState(bracket) {
         type: "single",
         size: Number(bracket.size || 0),
         byes: Number(bracket.byes || 0),
-        rounds: Array.isArray(bracket.rounds) ? cloneState(bracket.rounds) : [],
+        rounds: normalizeBracketRounds(bracket.rounds),
         nextMatchSequence: Number(bracket.nextMatchSequence || 1),
     };
+}
+
+function normalizeBracketRounds(rounds) {
+    return Array.isArray(rounds)
+        ? rounds.map((round) => ({
+            ...round,
+            matches: Array.isArray(round?.matches)
+                ? round.matches.map((match) => ({
+                    ...match,
+                    sourceA: match?.sourceA || "",
+                    sourceB: match?.sourceB || "",
+                    scoreA: match?.scoreA || "",
+                    scoreB: match?.scoreB || "",
+                    games: Array.isArray(match?.games) && match.games.length === 3
+                        ? match.games.map((game) => ({ a: game?.a || "", b: game?.b || "" }))
+                        : [{ a: "", b: "" }, { a: "", b: "" }, { a: "", b: "" }],
+                    winnerSide: match?.winnerSide || "",
+                    locked: typeof match?.locked === "boolean" ? match.locked : Boolean(match?.winnerSide),
+                }))
+                : [],
+        }))
+        : [];
 }
 
 function parseCsv(text) {
@@ -3126,6 +4672,50 @@ function getDisplayOrganization(value) {
     return organization;
 }
 
+function formatTournamentName(name, category) {
+    const rawName = String(name || "").trim();
+    const rawCategory = String(category || "").trim();
+    if (!rawName || !rawCategory) {
+        return rawName;
+    }
+
+    const suffix = ` - ${rawCategory}`;
+    return rawName.endsWith(suffix) ? rawName : `${rawName}${suffix}`;
+}
+
+function getTournamentBaseName(name, category) {
+    const fullName = String(name || "").trim();
+    const rawCategory = String(category || "").trim();
+    if (!fullName || !rawCategory) {
+        return fullName;
+    }
+
+    const suffix = ` - ${rawCategory}`;
+    return fullName.endsWith(suffix) ? fullName.slice(0, -suffix.length).trim() : fullName;
+}
+
+function renameTournamentEntry(tournamentId, nextBaseName) {
+    const tournamentIndex = state.tournaments.findIndex((item) => item.id === tournamentId);
+    if (tournamentIndex === -1) {
+        return;
+    }
+
+    const tournament = state.tournaments[tournamentIndex];
+    const updatedName = formatTournamentName(nextBaseName, tournament.category);
+    state.tournaments[tournamentIndex].name = updatedName;
+
+    if (activeTournamentId === tournamentId) {
+        state.tournament.name = updatedName;
+        if (elements.tournamentName) {
+            elements.tournamentName.value = updatedName;
+        }
+    }
+
+    persist();
+    renderAll();
+    setTournamentModeStatus(`Renamed tournament to ${updatedName}.`);
+}
+
 function formatBracketPlayerLabel(player) {
     const name = String(player?.name || "").trim() || "TBD";
     const organization = getBracketOrganizationLabel(player?.organization);
@@ -3264,10 +4854,52 @@ function renderOverviewFixed() {
                     <td>${escapeHtml(item.category || "-")}</td>
                     <td>${escapeHtml(item.format || "-")}</td>
                     <td>${tournamentTotalPlayers}</td>
-                    <td>${escapeHtml(item.notes || "-")}</td>
+                    <td>${escapeHtml(getTournamentProgressStatus(item))}</td>
                 </tr>
             `;
             }
         )
         .join("");
+}
+
+function getTournamentProgressStatus(tournament) {
+    if (!tournament) {
+        return "-";
+    }
+    const bracket = tournament.bracket;
+    if (!bracket || !Array.isArray(bracket.rounds) || bracket.rounds.length === 0) {
+        return "No bracket";
+    }
+    const matchRule = tournament.matchRule || "single_25";
+    const roundSummaries = bracket.rounds.map((round) => {
+        const playableMatches = Array.isArray(round?.matches)
+            ? round.matches.filter((match) => match.isPlayable)
+            : [];
+        const completed = playableMatches.filter((match) => isBracketMatchCompleted(match, matchRule)).length;
+        return { total: playableMatches.length, completed };
+    });
+    const overall = roundSummaries.reduce(
+        (acc, round) => {
+            acc.total += round.total;
+            acc.completed += round.completed;
+            return acc;
+        },
+        { total: 0, completed: 0 }
+    );
+    if (overall.total === 0) {
+        return "No matches";
+    }
+    if (overall.completed === 0) {
+        return "Not started";
+    }
+    if (overall.completed >= overall.total) {
+        return "Completed";
+    }
+    const currentIndex = roundSummaries.findIndex((round) => round.total > 0 && round.completed < round.total);
+    if (currentIndex === -1) {
+        return "In progress";
+    }
+    const current = roundSummaries[currentIndex];
+    const roundLabel = getBracketRoundLabel(currentIndex, bracket.rounds.length);
+    return `${roundLabel}: ${current.completed}/${current.total} completed`;
 }

@@ -263,6 +263,92 @@ textarea { resize: vertical; }
 }
 
 .score-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.score-input {
+    width: 72px;
+    min-height: 38px;
+    padding: 6px 8px;
+}
+.score-divider-cell {
+    width: 16px;
+    min-width: 34px;
+    padding: 0 6px;
+    text-align: center;
+    color: var(--muted);
+    font-size: 0.78rem;
+    font-weight: 700;
+}
+.score-divider-line {
+    display: block;
+    width: 100%;
+    height: auto;
+    margin: 0 auto;
+}
+.progress-round-row td {
+    padding: 6px 0 4px;
+    border-bottom: 0;
+    background: transparent;
+}
+.progress-round-bar {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 12px;
+    padding: 6px 10px;
+    border-top: 1px solid rgba(171, 202, 255, 0.22);
+    border-bottom: 1px solid rgba(171, 202, 255, 0.12);
+    color: var(--text);
+}
+.progress-round-bar span {
+    color: var(--muted);
+    font-size: 0.78rem;
+}
+.section-panel[data-section="progress"] table {
+    font-size: 0.72rem;
+}
+.section-panel[data-section="progress"] th,
+.section-panel[data-section="progress"] td {
+    padding: 6px 6px;
+}
+.section-panel[data-section="progress"] th {
+    font-size: 0.7rem;
+    letter-spacing: 0.02em;
+}
+.section-panel[data-section="progress"] .score-input {
+    font-size: 0.7rem;
+    min-height: 28px;
+    padding: 4px 6px;
+}
+.section-panel[data-section="progress"] .score-divider-cell {
+    font-size: 0.7rem;
+    min-width: 24px;
+    padding: 0 4px;
+}
+.progress-completed-row td {
+    background: rgba(70, 196, 140, 0.08);
+}
+.progress-editing-row td {
+    background: rgba(255, 145, 77, 0.08);
+}
+.progress-bye-row td {
+    background: rgba(255, 214, 167, 0.12);
+}
+.progress-completed-row .score-input {
+    background: rgba(255, 255, 255, 0.04);
+}
+.progress-bye-cell {
+    color: var(--muted);
+    text-align: center;
+    font-weight: 600;
+}
+.section-panel[data-section="progress"] .progress-action-cell {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    align-items: center;
+    justify-content: flex-start;
+    flex-direction: row;
+    white-space: nowrap;
+}
 .bracket-grid {
     margin-top: 18px;
     overflow: auto;
@@ -369,7 +455,7 @@ textarea { resize: vertical; }
 .svg-round-title {
     fill: #ffcf9e;
     font-family: "Sora", sans-serif;
-    font-size: 12px;
+    font-size: 10px;
     font-weight: 700;
     letter-spacing: 1.2px;
     text-transform: uppercase;
@@ -380,6 +466,10 @@ textarea { resize: vertical; }
     stroke: rgba(171, 202, 255, 0.18);
     stroke-width: 1.5;
 }
+.svg-match-box-bye {
+    fill: rgba(255, 214, 167, 0.14);
+    stroke: rgba(255, 214, 167, 0.4);
+}
 
 .svg-match-box-auto {
     fill: #0a1422;
@@ -389,7 +479,7 @@ textarea { resize: vertical; }
 .svg-match-label {
     fill: #93a6c5;
     font-family: "Space Grotesk", sans-serif;
-    font-size: 6.5px;
+    font-size: 6px;
     font-weight: 700;
     letter-spacing: 0.4px;
     text-transform: uppercase;
@@ -401,6 +491,9 @@ textarea { resize: vertical; }
 
 .svg-slot {
     fill: rgba(255, 255, 255, 0.05);
+}
+.svg-slot-bye {
+    fill: rgba(255, 214, 167, 0.12);
 }
 
 .svg-slot-editable {
@@ -428,15 +521,18 @@ textarea { resize: vertical; }
 .svg-seed-text {
     fill: #ffcb96;
     font-family: "Space Grotesk", sans-serif;
-    font-size: 8px;
+    font-size: 7px;
     font-weight: 700;
 }
 
 .svg-slot-text {
     fill: #f2f7ff;
     font-family: "Space Grotesk", sans-serif;
-    font-size: 8px;
+    font-size: 7px;
     pointer-events: none;
+}
+.svg-slot-text-bye {
+    fill: #ffd6a7;
 }
 
 .svg-connector {
@@ -456,7 +552,7 @@ textarea { resize: vertical; }
 .svg-champion-name {
     fill: #fff4e4;
     font-family: "Sora", sans-serif;
-    font-size: 11px;
+    font-size: 9px;
     font-weight: 700;
 }
 
@@ -783,11 +879,23 @@ tbody .icon-button {
     }
 
     .svg-match-box,
+    .svg-match-box-bye,
     .svg-slot,
+    .svg-slot-bye,
     .svg-seed-box,
     .svg-champion-box {
         fill: #ffffff;
         stroke: #bcbcbc;
+    }
+    .svg-match-box-bye {
+        fill: #fff1e1;
+        stroke: #d5c0a6;
+    }
+    .svg-slot-bye {
+        fill: #fff7ee;
+    }
+    .svg-slot-text-bye {
+        fill: #8b5c2e;
     }
 
     .svg-connector {
