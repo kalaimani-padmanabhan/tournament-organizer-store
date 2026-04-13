@@ -1066,7 +1066,8 @@ function renderSidebarState() {
 }
 
 function addManualPlayer() {
-    const name = elements.manualPlayerName?.value.trim() || "";
+    const rawName = elements.manualPlayerName?.value.trim() || "";
+    const name = rawName ? rawName.toUpperCase() : "";
     const registrationNumber = elements.manualRegistrationNumber?.value.trim() || "";
     const aadhar = elements.manualAadhar?.value.trim() || "";
     const organization = elements.manualOrganization?.value.trim() || "";
@@ -1309,7 +1310,8 @@ function importPlayersFromCsv(csvText, sourceLabel) {
     );
 
     rows.slice(1).forEach((row) => {
-        const name = (row[nameIndex] || "").trim();
+        const rawName = (row[nameIndex] || "").trim();
+        const name = rawName ? rawName.toUpperCase() : "";
         const contact = contactIndex === -1 ? "" : (row[contactIndex] || "").trim();
         const registrationNumber = registrationIndex === -1 ? "" : (row[registrationIndex] || "").trim();
         const aadhar = aadharIndex === -1 ? "" : (row[aadharIndex] || "").trim();
@@ -2299,8 +2301,7 @@ function buildBracketScoreSheetMarkup(tournament, bracket) {
         return rows.length;
     };
 
-    pushRow(["Title", "", "", "", "", "", "", ""], "score-row");
-    pushRow(["Date", "", "", "", "", "", "", ""], "score-row");
+    pushRow(["__TITLE__", "", "", "", "", "", "", ""], "score-row");
 
     const firstRound = bracket.rounds[0];
     let matchCounter = 0;
@@ -2309,7 +2310,7 @@ function buildBracketScoreSheetMarkup(tournament, bracket) {
         matchCounter += 1;
         const matchNumbers = (match.byeA || match.byeB)
             ? ["", "", "", "", ""]
-            : buildMatchNumberPath(bracket, matchIndex, 5);
+            : buildMatchNumberPath(bracket, matchIndex, 5, tournament?.category);
 
         const meta = {
             slotARow: 0,
@@ -2350,7 +2351,7 @@ function buildBracketScoreSheetMarkup(tournament, bracket) {
         matchRowMeta[matchIndex] = meta;
     });
 
-    const connectorData = buildScoreSheetConnectorMap(bracket, matchRowMeta, template);
+    const connectorData = buildScoreSheetConnectorMap(bracket, matchRowMeta, template, tournament?.category);
 
     return `
         <table>
@@ -2366,10 +2367,18 @@ function buildBracketScoreSheetMarkup(tournament, bracket) {
                                 const borderColor = getScoreSheetBorderColor(column);
                                 const borderStyle = buildScoreSheetBorderStyle(borderFlags, borderColor);
                                 const connectorValue = connectorData.values[cellKey] || "";
-                                const outputValue = connectorValue || cell;
+                                let outputValue = connectorValue || cell;
                                 const borderAttr = borderStyle
                                     ? ` style="${borderStyle}"`
                                     : (row.className === "gap-row" ? ' style="border:0;"' : "");
+
+                                if (outputValue === "__TITLE__" && column === "A") {
+                                    const title = tournament?.name || "Tournament";
+                                    return `<td class="score-cell col-${column}" colspan="${template.columns.length}" style="text-align:center;font-weight:700;">${escapeHtml(title)}</td>`;
+                                }
+                                if (outputValue === "__TITLE__") {
+                                    return "";
+                                }
                                 return `<td class="score-cell col-${column}"${borderAttr}>${escapeHtml(outputValue || "")}</td>`;
                             }).join("")}
                         </tr>
@@ -2409,7 +2418,7 @@ function getScoreSheetTemplate() {
 function getScoreSheetBorderColor(column) {
     const palette = {
         E: "#2b6cb0",
-        F: "#2563eb",
+        F: "#8b5a2b",
         G: "#805ad5",
         H: "#d97706",
         I: "#c026d3",
@@ -2418,12 +2427,13 @@ function getScoreSheetBorderColor(column) {
     return palette[column] || "#222";
 }
 
-function buildScoreSheetConnectorMap(bracket, matchRowMeta, template) {
+function buildScoreSheetConnectorMap(bracket, matchRowMeta, template, category) {
     const borders = {};
     const values = {};
     const rounds = bracket.rounds || [];
     const roundColumns = ["F", "G", "H", "I", "J"];
     const matchRowByRound = [];
+    const prefix = getCategoryMatchPrefix(category);
 
     if (!rounds.length) {
         return { borders, values };
@@ -2438,7 +2448,7 @@ function buildScoreSheetConnectorMap(bracket, matchRowMeta, template) {
         }
         const top = meta.slotARow || slotRows[0] || 0;
         const bottom = meta.slotBRow || top;
-        const anchor = Math.round((top + bottom) / 2);
+        const anchor = getConnectorAnchorRow(top, bottom);
         return { anchor, top, bottom, number: getMatchNumberFromLabel(match.label) };
     });
 
@@ -2478,9 +2488,12 @@ function buildScoreSheetConnectorMap(bracket, matchRowMeta, template) {
         matchRowByRound[roundIndex] = rounds[roundIndex].matches.map((match, matchIndex) => {
             const left = prev[matchIndex * 2] || {};
             const right = prev[matchIndex * 2 + 1] || {};
-            const top = Math.min(left.bottom || left.anchor || left.top || 0, right.bottom || right.anchor || right.top || 0);
-            const bottom = Math.max(left.bottom || left.anchor || left.bottom || 0, right.bottom || right.anchor || right.bottom || 0);
-            const anchor = top && bottom ? Math.round((top + bottom) / 2) : (left.bottom || left.anchor || right.bottom || right.anchor || top);
+            const leftAnchor = left.anchor || left.bottom || left.top || 0;
+            const rightAnchor = right.anchor || right.bottom || right.top || 0;
+            const anchorCandidates = [leftAnchor, rightAnchor].filter((value) => value > 0);
+            const top = anchorCandidates.length ? Math.min(...anchorCandidates) : 0;
+            const bottom = anchorCandidates.length ? Math.max(...anchorCandidates) : 0;
+            const anchor = getConnectorAnchorRow(top, bottom);
             return { anchor, top, bottom, number: getMatchNumberFromLabel(match.label) };
         });
     }
@@ -2510,11 +2523,19 @@ function buildScoreSheetConnectorMap(bracket, matchRowMeta, template) {
                 borders[key] = Array.from(flags).join("");
             }
             const anchorKey = `${column}${meta.anchor}`;
-            values[anchorKey] = meta.number;
+            values[anchorKey] = meta.number ? `${prefix}${meta.number}` : "";
         });
     });
 
     return { borders, values };
+}
+
+function getConnectorAnchorRow(top, bottom) {
+    if (!top || !bottom) {
+        return top || bottom || 0;
+    }
+    const length = bottom - top + 1;
+    return top + Math.floor(length / 2);
 }
 
 function extractBracketOrganizationValue(value) {
@@ -2529,9 +2550,10 @@ function extractBracketOrganizationValue(value) {
     return "";
 }
 
-function buildMatchNumberPath(bracket, matchIndex, maxRounds) {
+function buildMatchNumberPath(bracket, matchIndex, maxRounds, category) {
     const rounds = bracket.rounds || [];
     const path = [];
+    const prefix = getCategoryMatchPrefix(category);
     for (let roundIndex = 0; roundIndex < maxRounds; roundIndex += 1) {
         if (!rounds[roundIndex]) {
             path.push("");
@@ -2540,7 +2562,7 @@ function buildMatchNumberPath(bracket, matchIndex, maxRounds) {
         const roundMatchIndex = Math.floor(matchIndex / (2 ** roundIndex));
         const label = rounds[roundIndex]?.matches?.[roundMatchIndex]?.label || "";
         const matchNumber = getMatchNumberFromLabel(label);
-        path.push(matchNumber);
+        path.push(matchNumber ? `${prefix}${matchNumber}` : "");
     }
     return path;
 }
@@ -2560,6 +2582,18 @@ function parseBracketPlayerLabel(label) {
         name: cleaned.slice(0, separatorIndex).trim(),
         organization: cleaned.slice(separatorIndex + 3).trim(),
     };
+}
+
+function getCategoryMatchPrefix(category) {
+    const text = String(category || "").trim();
+    if (!text) {
+        return "";
+    }
+    const words = text.match(/[A-Za-z]+/g) || [];
+    if (words.length === 0) {
+        return "";
+    }
+    return words.map((word) => word[0].toUpperCase()).join("");
 }
 
 function buildPlayerOrganizationMap(tournament) {
@@ -5284,24 +5318,12 @@ function getDisplayOrganization(value) {
 
 function formatTournamentName(name, category) {
     const rawName = String(name || "").trim();
-    const rawCategory = String(category || "").trim();
-    if (!rawName || !rawCategory) {
-        return rawName;
-    }
-
-    const suffix = ` - ${rawCategory}`;
-    return rawName.endsWith(suffix) ? rawName : `${rawName}${suffix}`;
+    return rawName;
 }
 
 function getTournamentBaseName(name, category) {
     const fullName = String(name || "").trim();
-    const rawCategory = String(category || "").trim();
-    if (!fullName || !rawCategory) {
-        return fullName;
-    }
-
-    const suffix = ` - ${rawCategory}`;
-    return fullName.endsWith(suffix) ? fullName.slice(0, -suffix.length).trim() : fullName;
+    return fullName;
 }
 
 function renameTournamentEntry(tournamentId, nextBaseName) {
