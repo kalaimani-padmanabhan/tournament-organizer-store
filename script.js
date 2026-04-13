@@ -20,6 +20,447 @@ const defaultState = {
     announcements: [],
 };
 
+const SCORE_SHEET_TEMPLATE = {
+    rowCount: 111,
+    columns: ["A", "B", "E", "F", "G", "H", "I", "J"],
+    columnWidths: [9.140625, 32, 13, 9.140625, 9.140625, 9.140625, 9.140625, 9.140625],
+    seedRows: [6, 8, 9, 11, 12, 14, 15, 18, 19, 21, 22, 24, 25, 27, 28, 32, 34, 35, 37, 38, 40, 41, 43, 44, 46, 47, 49, 50, 52, 53, 64, 66, 67, 69, 70, 72, 73, 75, 76, 78, 79, 81, 82, 84, 85, 89, 90, 92, 93, 95, 96, 98, 99, 101, 102, 104, 105, 108, 109, 111],
+    seedRowToSeed: {
+        "6": "1",
+        "8": "2",
+        "9": "3",
+        "11": "4",
+        "12": "5",
+        "14": "6",
+        "15": "7",
+        "18": "8",
+        "19": "9",
+        "21": "10",
+        "22": "11",
+        "24": "12",
+        "25": "13",
+        "27": "14",
+        "28": "15",
+        "32": "16",
+        "34": "17",
+        "35": "18",
+        "37": "19",
+        "38": "20",
+        "40": "21",
+        "41": "22",
+        "43": "23",
+        "44": "24",
+        "46": "25",
+        "47": "26",
+        "49": "27",
+        "50": "28",
+        "52": "29",
+        "53": "30",
+        "64": "31",
+        "66": "32",
+        "67": "33",
+        "69": "34",
+        "70": "35",
+        "72": "36",
+        "73": "37",
+        "75": "38",
+        "76": "39",
+        "78": "40",
+        "79": "41",
+        "81": "42",
+        "82": "43",
+        "84": "44",
+        "85": "45",
+        "89": "46",
+        "90": "47",
+        "92": "48",
+        "93": "49",
+        "95": "50",
+        "96": "51",
+        "98": "52",
+        "99": "53",
+        "101": "54",
+        "102": "55",
+        "104": "56",
+        "105": "57",
+        "108": "58",
+        "109": "59",
+        "111": "60"
+    },
+    matchMap: {
+        "F8": "1",
+        "F11": "2",
+        "F14": "3",
+        "F18": "4",
+        "F21": "5",
+        "F24": "6",
+        "F27": "7",
+        "F34": "8",
+        "F37": "9",
+        "F40": "10",
+        "F43": "11",
+        "F46": "12",
+        "F49": "13",
+        "F52": "14",
+        "F66": "15",
+        "F69": "16",
+        "F72": "17",
+        "F75": "18",
+        "F78": "19",
+        "F81": "20",
+        "F84": "21",
+        "F89": "22",
+        "F92": "23",
+        "F95": "24",
+        "F98": "25",
+        "F101": "26",
+        "F104": "27",
+        "F108": "28",
+        "G7": "29",
+        "G13": "30",
+        "G19": "31",
+        "G26": "32",
+        "G33": "33",
+        "G39": "34",
+        "G44": "35",
+        "G51": "36",
+        "G65": "37",
+        "G71": "38",
+        "G76": "39",
+        "G83": "40",
+        "G90": "41",
+        "G97": "42",
+        "G102": "43",
+        "G110": "44",
+        "H9": "45",
+        "H24": "46",
+        "H36": "47",
+        "H49": "48",
+        "H68": "49",
+        "H81": "50",
+        "H93": "51",
+        "H106": "52",
+        "I16": "54",
+        "I42": "55",
+        "I74": "56",
+        "I99": "57",
+        "J30": "57",
+        "J87": "58"
+    },
+    borderMap: {
+        "E10": "tb",
+        "E100": "tb",
+        "E102": "rb",
+        "E103": "tb",
+        "E105": "rb",
+        "E107": "b",
+        "E109": "rb",
+        "E12": "rb",
+        "E13": "tb",
+        "E15": "rb",
+        "E17": "b",
+        "E19": "rb",
+        "E20": "tb",
+        "E22": "rb",
+        "E23": "tb",
+        "E25": "rb",
+        "E26": "tb",
+        "E28": "rb",
+        "E33": "b",
+        "E35": "rb",
+        "E36": "tb",
+        "E38": "rb",
+        "E39": "tb",
+        "E41": "rb",
+        "E42": "tb",
+        "E44": "rb",
+        "E45": "tb",
+        "E47": "rb",
+        "E48": "tb",
+        "E50": "rb",
+        "E51": "tb",
+        "E53": "rb",
+        "E65": "b",
+        "E67": "rb",
+        "E68": "tb",
+        "E7": "b",
+        "E70": "rb",
+        "E71": "b",
+        "E73": "rb",
+        "E74": "tb",
+        "E76": "rb",
+        "E77": "tb",
+        "E79": "rb",
+        "E80": "tb",
+        "E82": "rb",
+        "E83": "tb",
+        "E85": "rb",
+        "E88": "b",
+        "E9": "rb",
+        "E90": "rb",
+        "E91": "tb",
+        "E93": "rb",
+        "E94": "tb",
+        "E96": "rb",
+        "E97": "tb",
+        "E99": "rb",
+        "F102": "l",
+        "F104": "lrb",
+        "F108": "lb",
+        "F11": "lb",
+        "F12": "l",
+        "F14": "lrb",
+        "F15": "l",
+        "F18": "lb",
+        "F19": "l",
+        "F21": "lrb",
+        "F22": "l",
+        "F24": "lb",
+        "F25": "l",
+        "F27": "lrb",
+        "F28": "l",
+        "F32": "b",
+        "F34": "lrb",
+        "F35": "l",
+        "F37": "lb",
+        "F38": "l",
+        "F40": "lrb",
+        "F41": "l",
+        "F43": "lb",
+        "F44": "l",
+        "F46": "lrb",
+        "F47": "l",
+        "F49": "lb",
+        "F50": "l",
+        "F52": "lrb",
+        "F53": "l",
+        "F64": "b",
+        "F66": "lrb",
+        "F67": "l",
+        "F69": "lb",
+        "F70": "l",
+        "F72": "lrb",
+        "F73": "l",
+        "F75": "lb",
+        "F76": "l",
+        "F78": "lrb",
+        "F79": "l",
+        "F8": "lrb",
+        "F81": "lb",
+        "F82": "l",
+        "F84": "lrb",
+        "F85": "l",
+        "F89": "lb",
+        "F90": "l",
+        "F92": "lrb",
+        "F93": "l",
+        "F95": "lb",
+        "F96": "l",
+        "F98": "lrb",
+        "F99": "l",
+        "G102": "lb",
+        "G103": "l",
+        "G104": "l",
+        "G109": "l",
+        "G110": "lrb",
+        "G12": "l",
+        "G13": "lrb",
+        "G14": "l",
+        "G19": "lb",
+        "G20": "l",
+        "G21": "l",
+        "G25": "l",
+        "G26": "lrb",
+        "G27": "l",
+        "G33": "lb",
+        "G34": "l",
+        "G38": "l",
+        "G39": "lrb",
+        "G40": "l",
+        "G44": "lb",
+        "G45": "l",
+        "G46": "l",
+        "G50": "l",
+        "G51": "lrb",
+        "G52": "l",
+        "G65": "lb",
+        "G66": "l",
+        "G70": "l",
+        "G71": "lrb",
+        "G72": "l",
+        "G76": "lb",
+        "G77": "l",
+        "G78": "l",
+        "G8": "l",
+        "G82": "l",
+        "G83": "lrb",
+        "G84": "l",
+        "G90": "lb",
+        "G91": "l",
+        "G92": "l",
+        "G96": "l",
+        "G97": "lrb",
+        "G98": "l",
+        "G7": "lb",
+        "H10": "l",
+        "H104": "l",
+        "H105": "l",
+        "H106": "lrb",
+        "H107": "l",
+        "H108": "l",
+        "H109": "l",
+        "H11": "l",
+        "H12": "l",
+        "H13": "l",
+        "H20": "l",
+        "H21": "l",
+        "H22": "l",
+        "H23": "l",
+        "H24": "lrb",
+        "H25": "l",
+        "H26": "l",
+        "H34": "l",
+        "H35": "l",
+        "H36": "lb",
+        "H37": "l",
+        "H38": "l",
+        "H39": "l",
+        "H45": "l",
+        "H46": "l",
+        "H47": "l",
+        "H48": "l",
+        "H49": "lrb",
+        "H50": "l",
+        "H51": "l",
+        "H66": "l",
+        "H67": "l",
+        "H68": "lb",
+        "H69": "l",
+        "H70": "l",
+        "H71": "l",
+        "H77": "l",
+        "H78": "l",
+        "H79": "l",
+        "H8": "l",
+        "H80": "l",
+        "H81": "lrb",
+        "H82": "l",
+        "H83": "l",
+        "H91": "l",
+        "H92": "l",
+        "H93": "lb",
+        "H94": "l",
+        "H95": "l",
+        "H96": "l",
+        "H97": "l",
+        "H9": "lb",
+        "I10": "l",
+        "I101": "l",
+        "I102": "l",
+        "I103": "l",
+        "I104": "l",
+        "I105": "l",
+        "I106": "l",
+        "I11": "l",
+        "I12": "l",
+        "I13": "l",
+        "I14": "l",
+        "I15": "l",
+        "I16": "lb",
+        "I17": "l",
+        "I18": "l",
+        "I19": "l",
+        "I20": "l",
+        "I21": "l",
+        "I22": "l",
+        "I23": "l",
+        "I24": "l",
+        "I37": "l",
+        "I38": "l",
+        "I39": "l",
+        "I40": "l",
+        "I41": "l",
+        "I42": "lrb",
+        "I43": "l",
+        "I44": "l",
+        "I45": "l",
+        "I46": "l",
+        "I47": "l",
+        "I48": "l",
+        "I49": "l",
+        "I69": "l",
+        "I70": "l",
+        "I71": "l",
+        "I72": "l",
+        "I73": "l",
+        "I74": "lb",
+        "I75": "l",
+        "I76": "l",
+        "I77": "l",
+        "I78": "l",
+        "I79": "l",
+        "I80": "l",
+        "I81": "l",
+        "I94": "l",
+        "I95": "l",
+        "I96": "l",
+        "I97": "l",
+        "I98": "l",
+        "I99": "lrb",
+        "J17": "l",
+        "J18": "l",
+        "J19": "l",
+        "J20": "l",
+        "J21": "l",
+        "J22": "l",
+        "J23": "l",
+        "J24": "l",
+        "J25": "l",
+        "J26": "l",
+        "J27": "l",
+        "J28": "l",
+        "J29": "l",
+        "J30": "l",
+        "J31": "l",
+        "J32": "l",
+        "J33": "l",
+        "J34": "l",
+        "J35": "l",
+        "J36": "l",
+        "J37": "l",
+        "J38": "l",
+        "J39": "l",
+        "J40": "l",
+        "J41": "l",
+        "J42": "l",
+        "J75": "l",
+        "J76": "l",
+        "J77": "l",
+        "J78": "l",
+        "J79": "l",
+        "J80": "l",
+        "J81": "l",
+        "J82": "l",
+        "J83": "l",
+        "J84": "l",
+        "J85": "l",
+        "J86": "l",
+        "J87": "l",
+        "J88": "l",
+        "J89": "l",
+        "J90": "l",
+        "J91": "l",
+        "J92": "l",
+        "J93": "l",
+        "J94": "l",
+        "J95": "l",
+        "J96": "l",
+        "J97": "l",
+        "J98": "l",
+        "J99": "l"
+    }
+};
+
 let state = loadState();
 let tournamentMode = "";
 let activeTournamentId = "";
@@ -1794,6 +2235,8 @@ function exportBracketCsv(tournament) {
 }
 
 function exportBracketExcel(tournament) {
+    const preview = ensureByeAdvancements(tournament, tournament?.bracket);
+    const bracket = preview.bracket || tournament?.bracket;
     const workbook = `
         <html xmlns:o="urn:schemas-microsoft-com:office:office"
               xmlns:x="urn:schemas-microsoft-com:office:excel"
@@ -1814,42 +2257,20 @@ function exportBracketExcel(tournament) {
             <![endif]-->
             <style>
                 body { font-family: Arial, sans-serif; }
-                .sheet-title { font-size: 18px; font-weight: 700; margin-bottom: 12px; }
-                .section-title { font-size: 14px; font-weight: 700; margin: 18px 0 8px; }
-                .bracket-sheet { border-collapse: separate; border-spacing: 8px 8px; }
-                .bracket-sheet td { min-width: 190px; vertical-align: top; padding: 0; }
-                .round-title { font-size: 12px; font-weight: 700; color: #516176; text-transform: uppercase; padding-bottom: 4px; }
-                .pairing-cell { }
-                .pairing-wrap { min-width: 190px; min-height: 76px; border: 2px solid transparent; border-radius: 12px; padding: 4px; }
-                .pairing-wrap.pairing-active { border-color: #ff914d; background: #fff4eb; }
-                .pairing-wrap.pairing-active.pairing-next { border-right-color: #d96f2f; }
-                .pairing-wrap.pairing-active.pairing-fed { border-left-color: #d96f2f; }
-                .match-cell { position: relative; }
-                .match-cell.connector-right::after {
-                    content: "";
-                    position: absolute;
-                    top: 50%;
-                    right: -8px;
-                    width: 8px;
-                    border-top: 2px solid #ff914d;
-                }
-                .match-cell.connector-left::before {
-                    content: "";
-                    position: absolute;
-                    top: 50%;
-                    left: -8px;
-                    width: 8px;
-                    border-top: 2px solid #ff914d;
-                }
-                .match-card { border: 2px solid #ff914d; border-radius: 12px; padding: 8px; background: #fff7f1; }
-                .match-label { font-size: 11px; font-weight: 700; color: #7b421d; margin-bottom: 6px; text-transform: uppercase; }
-                .slot { border: 1px solid #f0c5a9; border-radius: 8px; padding: 6px 8px; margin-bottom: 6px; background: #ffffff; font-size: 12px; color: #1b2430; }
-                .slot:last-child { margin-bottom: 0; }
-                .empty-cell { min-width: 190px; height: 76px; }
+                table { border-collapse: collapse; table-layout: auto; }
+                .col-F, .col-G, .col-H, .col-I, .col-J { min-width: 144px; }
+                td { border: 0; padding: 0 2px; font-size: 12px; height: 15pt; line-height: 14px; vertical-align: middle; }
+                tr { height: 15pt; }
+                .score-cell { color: #111; }
+                .col-A { text-align: center; }
+                .col-B { text-align: left; }
+                .col-E { text-align: left; }
+                .col-F, .col-G, .col-H, .col-I, .col-J { text-align: center; font-weight: 600; }
+                .gap-row td { border: 0; }
             </style>
         </head>
         <body>
-            ${buildBracketExcelLayoutMarkup(tournament)}
+            ${buildBracketScoreSheetMarkup(tournament, bracket)}
         </body>
         </html>
     `;
@@ -1864,107 +2285,298 @@ function exportBracketExcel(tournament) {
     setBracketStatus("Bracket exported as Excel.");
 }
 
-function buildBracketExcelLayoutMarkup(tournament) {
-    const bracket = tournament?.bracket;
-    if (!bracket) {
+function buildBracketScoreSheetMarkup(tournament, bracket) {
+    if (!bracket || !bracket.rounds?.length) {
         return "";
     }
+    const template = getScoreSheetTemplate();
+    const nameToOrg = buildPlayerOrganizationMap(tournament);
+    const rows = [];
+    const matchRowMeta = [];
+    const emptyRow = () => template.columns.map(() => "");
+    const pushRow = (cells, className = "score-row") => {
+        rows.push({ className, cells });
+        return rows.length;
+    };
 
-    const sections = bracket.type === "double"
-        ? [
-            { title: "Winners Bracket", rounds: bracket.winners?.rounds || [] },
-            { title: "Losers Bracket", rounds: bracket.losers?.rounds || [] },
-            { title: "Finals", rounds: bracket.finals?.rounds || [] },
-        ]
-        : [
-            { title: "Main Bracket", rounds: bracket.rounds || [] },
-        ];
+    pushRow(["Title", "", "", "", "", "", "", ""], "score-row");
+    pushRow(["Date", "", "", "", "", "", "", ""], "score-row");
 
-    return [
-        `<div class="sheet-title">${escapeHtml(`${tournament.name} - ${tournament.category}`)}</div>`,
-        ...sections.map((section) => buildBracketExcelSectionMarkup(section.title, section.rounds)),
-    ].join("");
-}
+    const firstRound = bracket.rounds[0];
+    let matchCounter = 0;
 
-function buildBracketExcelSectionMarkup(sectionTitle, rounds) {
-    if (!rounds.length) {
-        return "";
-    }
+    firstRound.matches.forEach((match, matchIndex) => {
+        matchCounter += 1;
+        const matchNumbers = (match.byeA || match.byeB)
+            ? ["", "", "", "", ""]
+            : buildMatchNumberPath(bracket, matchIndex, 5);
 
-    const totalRows = getBracketExcelRowCount(rounds);
-    const grid = Array.from({ length: totalRows }, () => Array.from({ length: rounds.length }, () => ""));
+        const meta = {
+            slotARow: 0,
+            slotBRow: 0,
+            gapRow: 0,
+            matchNumbers,
+        };
 
-    rounds.forEach((round, roundIndex) => {
-        round.matches.forEach((match, matchIndex) => {
-            const rowIndex = getBracketExcelTopRow(roundIndex, matchIndex);
-            if (rowIndex >= totalRows) {
+        const addSlotRow = (seedValue, slotLabel, isByeSlot) => {
+            const labelText = String(slotLabel || "").trim();
+            if (!labelText || isByeSlot || /^BYE$/i.test(labelText)) {
                 return;
             }
-            const connectorClasses = [
-                "match-cell",
-                roundIndex > 0 ? "connector-left" : "",
-                roundIndex < rounds.length - 1 ? "connector-right" : "",
-            ].filter(Boolean).join(" ");
-            grid[rowIndex][roundIndex] = `
-                <div class="${connectorClasses}">
-                    <div class="match-card">
-                    <div class="match-label">${escapeHtml(match.displayLabel || match.label || "Match")}</div>
-                    <div class="slot">${escapeHtml(formatBracketExcelSlot(match.slotA, match.seedA, match.byeA))}</div>
-                    <div class="slot">${escapeHtml(formatBracketExcelSlot(match.slotB, match.seedB, match.byeB))}</div>
-                    </div>
-                </div>
-            `;
-        });
+            const parsed = parseBracketPlayerLabel(labelText);
+            const name = parsed.name || labelText;
+            const academyRaw = nameToOrg.get(normalizeNameKey(name)) || parsed.organization || "";
+            const academy = extractBracketOrganizationValue(academyRaw);
+            const rowIndex = pushRow([
+                String(seedValue || "").trim(),
+                name,
+                academy,
+                "", "", "", "", "",
+            ]);
+            return rowIndex;
+        };
+
+        meta.slotARow = addSlotRow(match.seedA, match.slotA, match.byeA) || 0;
+        meta.slotBRow = addSlotRow(match.seedB, match.slotB, match.byeB) || 0;
+
+        meta.gapRow = pushRow(emptyRow(), "gap-row");
+        if (matchCounter % 8 === 0) {
+            pushRow(emptyRow(), "gap-row");
+            pushRow(emptyRow(), "gap-row");
+        } else if (matchCounter % 4 === 0) {
+            pushRow(emptyRow(), "gap-row");
+        }
+
+        matchRowMeta[matchIndex] = meta;
     });
 
+    const connectorData = buildScoreSheetConnectorMap(bracket, matchRowMeta, template);
+
     return `
-        <div class="section-title">${escapeHtml(sectionTitle)}</div>
-        <table class="bracket-sheet">
-            <thead>
-                <tr>
-                    ${rounds.map((_, roundIndex) => `<td class="round-title">${escapeHtml(getBracketRoundLabel(roundIndex, rounds.length))}</td>`).join("")}
-                </tr>
-            </thead>
+        <table>
             <tbody>
-                ${grid.map((row) => `
-                    <tr>
-                        ${row.map((cell, cellIndex) => {
-                            const wrapClasses = [
-                                "pairing-wrap",
-                                cell ? "pairing-active" : "",
-                                cell && cellIndex < row.length - 1 ? "pairing-next" : "",
-                                cell && cellIndex > 0 ? "pairing-fed" : "",
-                            ].filter(Boolean).join(" ");
-                            return `<td class="pairing-cell"><div class="${wrapClasses}">${cell || '<div class="empty-cell"></div>'}</div></td>`;
-                        }).join("")}
-                    </tr>
-                `).join("")}
+                ${rows.map((row, rowIndex) => {
+                    const sheetRow = rowIndex + 1;
+                    return `
+                        <tr class="${row.className}">
+                            ${row.cells.map((cell, index) => {
+                                const column = template.columns[index];
+                                const cellKey = `${column}${sheetRow}`;
+                                const borderFlags = connectorData.borders[cellKey] || "";
+                                const borderColor = getScoreSheetBorderColor(column);
+                                const borderStyle = buildScoreSheetBorderStyle(borderFlags, borderColor);
+                                const connectorValue = connectorData.values[cellKey] || "";
+                                const outputValue = connectorValue || cell;
+                                const borderAttr = borderStyle
+                                    ? ` style="${borderStyle}"`
+                                    : (row.className === "gap-row" ? ' style="border:0;"' : "");
+                                return `<td class="score-cell col-${column}"${borderAttr}>${escapeHtml(outputValue || "")}</td>`;
+                            }).join("")}
+                        </tr>
+                    `;
+                }).join("")}
             </tbody>
         </table>
     `;
 }
 
-function getBracketExcelRowCount(rounds) {
-    let maxRow = 1;
-    rounds.forEach((round, roundIndex) => {
-        round.matches.forEach((_, matchIndex) => {
-            const rowIndex = getBracketExcelTopRow(roundIndex, matchIndex);
-            if (rowIndex > maxRow) {
-                maxRow = rowIndex;
+
+function buildScoreSheetBorderStyle(flags, color = "#222") {
+    if (!flags) {
+        return "";
+    }
+    const borderColor = color;
+    const styles = [];
+    if (flags.includes("l")) {
+        styles.push(`border-left: 1px solid ${borderColor}`);
+    }
+    if (flags.includes("t")) {
+        styles.push(`border-top: 1px solid ${borderColor}`);
+    }
+    if (flags.includes("r")) {
+        styles.push(`border-right: 1px solid ${borderColor}`);
+    }
+    if (flags.includes("b")) {
+        styles.push(`border-bottom: 1px solid ${borderColor}`);
+    }
+    return styles.join("; ");
+}
+
+function getScoreSheetTemplate() {
+    return SCORE_SHEET_TEMPLATE;
+}
+
+function getScoreSheetBorderColor(column) {
+    const palette = {
+        E: "#2b6cb0",
+        F: "#2563eb",
+        G: "#805ad5",
+        H: "#d97706",
+        I: "#c026d3",
+        J: "#dc2626",
+    };
+    return palette[column] || "#222";
+}
+
+function buildScoreSheetConnectorMap(bracket, matchRowMeta, template) {
+    const borders = {};
+    const values = {};
+    const rounds = bracket.rounds || [];
+    const roundColumns = ["F", "G", "H", "I", "J"];
+    const matchRowByRound = [];
+
+    if (!rounds.length) {
+        return { borders, values };
+    }
+
+    matchRowByRound[0] = rounds[0].matches.map((match, matchIndex) => {
+        const meta = matchRowMeta[matchIndex] || {};
+        const slotRows = [meta.slotARow, meta.slotBRow].filter(Boolean);
+        if (match.byeA || match.byeB) {
+            const row = slotRows[0] || meta.gapRow || 0;
+            return { anchor: row, top: row, bottom: row, number: "" };
+        }
+        const top = meta.slotARow || slotRows[0] || 0;
+        const bottom = meta.slotBRow || top;
+        const anchor = Math.round((top + bottom) / 2);
+        return { anchor, top, bottom, number: getMatchNumberFromLabel(match.label) };
+    });
+
+    rounds[0].matches.forEach((match, matchIndex) => {
+        const meta = matchRowMeta[matchIndex] || {};
+        const applyRightBorder = (rowIndex, caps = "") => {
+            if (!rowIndex) {
+                return;
             }
+            const key = `E${rowIndex}`;
+            const flags = new Set((borders[key] || "").split("").filter(Boolean));
+            flags.add("r");
+            if (caps.includes("t")) {
+                flags.add("t");
+            }
+            if (caps.includes("b")) {
+                flags.add("b");
+            }
+            borders[key] = Array.from(flags).join("");
+        };
+        const isBye = Boolean(match.byeA || match.byeB);
+        const hasPair = Boolean(meta.slotARow && meta.slotBRow);
+        if (isBye) {
+            applyRightBorder(meta.slotARow, "tb");
+            return;
+        }
+        if (hasPair) {
+            applyRightBorder(meta.slotARow, "t");
+            applyRightBorder(meta.slotBRow, "b");
+        } else {
+            applyRightBorder(meta.slotARow, "");
+        }
+    });
+
+    for (let roundIndex = 1; roundIndex < rounds.length && roundIndex < roundColumns.length; roundIndex += 1) {
+        const prev = matchRowByRound[roundIndex - 1];
+        matchRowByRound[roundIndex] = rounds[roundIndex].matches.map((match, matchIndex) => {
+            const left = prev[matchIndex * 2] || {};
+            const right = prev[matchIndex * 2 + 1] || {};
+            const top = Math.min(left.bottom || left.anchor || left.top || 0, right.bottom || right.anchor || right.top || 0);
+            const bottom = Math.max(left.bottom || left.anchor || left.bottom || 0, right.bottom || right.anchor || right.bottom || 0);
+            const anchor = top && bottom ? Math.round((top + bottom) / 2) : (left.bottom || left.anchor || right.bottom || right.anchor || top);
+            return { anchor, top, bottom, number: getMatchNumberFromLabel(match.label) };
+        });
+    }
+
+    matchRowByRound.forEach((roundMatches, roundIndex) => {
+        const column = roundColumns[roundIndex];
+        if (!column) {
+            return;
+        }
+        roundMatches.forEach((meta) => {
+            if (!meta || !meta.anchor || !meta.number) {
+                return;
+            }
+            const top = meta.top || meta.anchor;
+            const bottom = meta.bottom || meta.anchor;
+            for (let row = top; row <= bottom; row += 1) {
+                const key = `${column}${row}`;
+                const existing = borders[key] || "";
+                const flags = new Set(existing.split("").filter(Boolean));
+                flags.add("r");
+                if (row === top) {
+                    flags.add("t");
+                }
+                if (row === bottom) {
+                    flags.add("b");
+                }
+                borders[key] = Array.from(flags).join("");
+            }
+            const anchorKey = `${column}${meta.anchor}`;
+            values[anchorKey] = meta.number;
         });
     });
-    return maxRow + 1;
+
+    return { borders, values };
 }
 
-function getBracketExcelTopRow(roundIndex, matchIndex) {
-    return (2 ** roundIndex - 1) + matchIndex * (2 ** (roundIndex + 1));
+function extractBracketOrganizationValue(value) {
+    const text = String(value || "").trim();
+    if (!text) {
+        return "";
+    }
+    const match = text.match(/\(([^)]+)\)\s*$/);
+    if (match) {
+        return match[1].trim();
+    }
+    return "";
 }
 
-function formatBracketExcelSlot(label, seed, bye) {
-    const prefix = seed ? `[${seed}] ` : "";
-    const suffix = bye ? " (BYE)" : "";
-    return `${prefix}${String(label || "TBD")}${suffix}`;
+function buildMatchNumberPath(bracket, matchIndex, maxRounds) {
+    const rounds = bracket.rounds || [];
+    const path = [];
+    for (let roundIndex = 0; roundIndex < maxRounds; roundIndex += 1) {
+        if (!rounds[roundIndex]) {
+            path.push("");
+            continue;
+        }
+        const roundMatchIndex = Math.floor(matchIndex / (2 ** roundIndex));
+        const label = rounds[roundIndex]?.matches?.[roundMatchIndex]?.label || "";
+        const matchNumber = getMatchNumberFromLabel(label);
+        path.push(matchNumber);
+    }
+    return path;
+}
+
+function getMatchNumberFromLabel(label) {
+    const match = String(label || "").match(/(\d+)/);
+    return match ? match[1] : "";
+}
+
+function parseBracketPlayerLabel(label) {
+    const cleaned = String(label || "").replace(/\s*\(BYE\)\s*/gi, "").trim();
+    const separatorIndex = cleaned.indexOf(" - ");
+    if (separatorIndex === -1) {
+        return { name: cleaned, organization: "" };
+    }
+    return {
+        name: cleaned.slice(0, separatorIndex).trim(),
+        organization: cleaned.slice(separatorIndex + 3).trim(),
+    };
+}
+
+function buildPlayerOrganizationMap(tournament) {
+    const map = new Map();
+    const players = getBracketPlayers(tournament);
+    players.forEach((player) => {
+        const nameKey = normalizeNameKey(player?.name || "");
+        const organization = getDisplayOrganization(player?.organization);
+        if (nameKey && organization && !map.has(nameKey)) {
+            map.set(nameKey, organization);
+        }
+    });
+    return map;
+}
+
+function normalizeNameKey(value) {
+    return String(value || "").trim().toLowerCase();
 }
 
 function getBracketExportRows(tournament) {
@@ -2779,9 +3391,6 @@ function renderBracketProgress() {
             const resultSummary = isByeMatch && match.winnerSide
                 ? "BYE"
                 : (getBracketMatchResultSummary(match, matchRule) || "-");
-            const hasScores = matchRule === "best_of_3_25"
-                ? Array.isArray(match.games) && match.games.some((game) => String(game.a || "").trim() || String(game.b || "").trim())
-                : (String(match.scoreA || "").trim() || String(match.scoreB || "").trim());
             rows.push(`
                 <tr class="${completed ? "progress-completed-row" : ""} ${completed && !locked ? "progress-editing-row" : ""} ${isByeMatch ? "progress-bye-row" : ""}">
                     <td>${escapeHtml(match.label || "-")}</td>
@@ -2791,12 +3400,10 @@ function renderBracketProgress() {
                     <td>${escapeHtml(formatProgressPlayerLabel(winnerLabel, match.winnerSide === "A" ? match.seedA : match.winnerSide === "B" ? match.seedB : "" ) || "-")}</td>
                     <td>${escapeHtml(resultSummary)}</td>
                     <td class="progress-action-cell">
-                        ${isByeMatch || hasScores ? "" : `<button class="button ghost" type="button" data-progress-sheet="${roundIndex}:${matchIndex}">Prep Score Sheet</button>`}
-                        ${hasScores
-                            ? (completed && locked
-                                ? `<button class="button ghost" type="button" data-progress-unlock="${roundIndex}:${matchIndex}">Unlock</button>`
-                                : `<button class="button ghost" type="button" data-progress-save="${roundIndex}:${matchIndex}" ${canScore ? "" : "disabled"}>${completed ? "Update" : "Save"}</button>`)
-                            : ""}
+                        ${isByeMatch || completed ? "" : `<button class="button ghost" type="button" data-progress-sheet="${roundIndex}:${matchIndex}">Prep Score Sheet</button>`}
+                        ${completed && locked
+                            ? `<button class="button ghost" type="button" data-progress-unlock="${roundIndex}:${matchIndex}">Unlock</button>`
+                            : `<button class="button ghost" type="button" data-progress-save="${roundIndex}:${matchIndex}" ${canScore ? "" : "disabled"}>${completed ? "Update" : "Save"}</button>`}
                     </td>
                 </tr>
             `);
@@ -3124,6 +3731,7 @@ function unlockBracketProgressResult(key) {
     }
 
     match.locked = false;
+    match.winnerSide = "";
     state.tournaments[tournamentIndex].bracket = bracket;
     persist();
     renderAll();
@@ -3232,9 +3840,11 @@ function syncByeAdvancementSlots(bracket) {
             const seedField = targetSide === "A" ? "seedA" : "seedB";
             const sourceField = targetSide === "A" ? "sourceA" : "sourceB";
             const winnerSeed = match.winnerSide === "A" ? match.seedA : match.seedB;
+            const sourceLabel = String(match.label || "").trim();
+            const shouldTrackSource = /^Match\s+\d+/i.test(sourceLabel);
             targetMatch[slotField] = winnerLabel;
             targetMatch[seedField] = winnerSeed || "";
-            targetMatch[sourceField] = match.label || "";
+            targetMatch[sourceField] = shouldTrackSource ? sourceLabel : "";
         });
     }
 }
