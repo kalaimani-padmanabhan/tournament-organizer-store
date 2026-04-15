@@ -26,6 +26,41 @@ button, input, select, textarea { font: inherit; }
 .page-shell { width: min(1220px, calc(100% - 28px)); margin: 0 auto; padding: 20px 0 28px; }
 .site-header, .sidebar, .panel, .item-card, .table-wrap { border: 1px solid var(--line); border-radius: 24px; background: var(--surface); box-shadow: var(--shadow); }
 
+body.auth-locked .page-shell {
+    display: none;
+}
+
+.auth-shell {
+    display: none;
+    min-height: 100vh;
+    width: min(560px, calc(100% - 28px));
+    margin: 0 auto;
+    padding: 40px 0;
+    align-items: center;
+}
+
+body.auth-locked .auth-shell {
+    display: flex;
+}
+
+.auth-card {
+    width: 100%;
+    padding: 28px;
+    border: 1px solid var(--line);
+    border-radius: 28px;
+    background: var(--surface);
+    box-shadow: var(--shadow);
+}
+
+.auth-card h1 {
+    margin: 8px 0 10px;
+    font-family: "Sora", sans-serif;
+}
+
+.auth-form {
+    margin-top: 18px;
+}
+
 .site-header {
     display: flex;
     align-items: center;
@@ -130,6 +165,25 @@ button, input, select, textarea { font: inherit; }
     justify-content: space-between;
     gap: 18px;
     margin-bottom: 20px;
+}
+
+.auth-actions {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+}
+
+.auth-session-copy {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    color: var(--muted);
+}
+
+.auth-session-copy strong {
+    color: var(--text);
+    font-family: "Sora", sans-serif;
+    font-size: 0.95rem;
 }
 .header-actions {
     display: flex;

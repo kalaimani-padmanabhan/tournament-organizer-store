@@ -11,6 +11,23 @@
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 </head>
 <body>
+    <section class="auth-shell" id="authShell">
+        <div class="auth-card">
+            <p class="eyebrow">Secure Access</p>
+            <h1>Sign in to BracketBase</h1>
+            <p class="item-subtitle">Use your Supabase email and password to open the tournament workspace.</p>
+            <form id="authForm" class="form-grid auth-form">
+                <label>Email
+                    <input id="authEmail" type="email" placeholder="name@example.com" autocomplete="username" required>
+                </label>
+                <label>Password
+                    <input id="authPassword" type="password" placeholder="Enter password" autocomplete="current-password" required>
+                </label>
+                <button class="button span-2" type="submit">Sign in</button>
+            </form>
+            <div id="authStatus" class="empty-state small">Sign in to access tournaments, brackets, and progress data.</div>
+        </div>
+    </section>
     <div class="page-shell">
         <header class="site-header">
             <div class="brand">
@@ -24,6 +41,13 @@
                 <div><span>Tournaments</span><strong id="summaryTournament">0</strong></div>
                 <div><span>Players</span><strong id="summaryTeams">0</strong></div>
                 <div><span>Matches</span><strong id="summaryMatches">0</strong></div>
+            </div>
+            <div class="auth-actions">
+                <div class="auth-session-copy">
+                    <span>Signed in as</span>
+                    <strong id="authSessionLabel">Not signed in</strong>
+                </div>
+                <button class="button ghost" id="signOutButton" type="button">Sign out</button>
             </div>
         </header>
         <main class="app-grid">

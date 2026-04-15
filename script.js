@@ -485,6 +485,9 @@ let supabaseClient = null;
 let remoteSyncTimer = null;
 let remoteSyncInFlight = null;
 let remoteStateReady = false;
+let currentSession = null;
+let currentUserRole = "";
+let activeSection = "overview";
 let bracketEditMode = false;
 let bracketDirty = false;
 let bracketDraft = null;
@@ -588,13 +591,20 @@ const elements = {
     backupExportButton: document.getElementById("backupExportButton"),
     backupImportButton: document.getElementById("backupImportButton"),
     backupImportInput: document.getElementById("backupImportInput"),
+    authShell: document.getElementById("authShell"),
+    authForm: document.getElementById("authForm"),
+    authEmail: document.getElementById("authEmail"),
+    authPassword: document.getElementById("authPassword"),
+    authStatus: document.getElementById("authStatus"),
+    authSessionLabel: document.getElementById("authSessionLabel"),
+    signOutButton: document.getElementById("signOutButton"),
     teamCardTemplate: document.getElementById("teamCardTemplate"),
     announcementTemplate: document.getElementById("announcementTemplate"),
 };
 
 bindEvents();
 renderAll();
-initializeRemotePersistence();
+initializeAuth();
 
 function bindEvents() {
     if (elements.sidebarToggleButton) {
@@ -607,10 +617,10 @@ function bindEvents() {
     elements.navItems.forEach((item) => {
         item.addEventListener("click", () => {
             const section = item.dataset.section;
-            elements.navItems.forEach((nav) => nav.classList.toggle("active", nav === item));
-            elements.panels.forEach((panel) => {
-                panel.classList.toggle("active", panel.dataset.section === section);
-            });
+            if (!canAccessSection(section)) {
+                return;
+            }
+            setActiveSection(section);
         });
     });
 
@@ -995,7 +1005,7 @@ function bindEvents() {
                     elements.tournamentMatchRule.value = state.tournament.matchRule;
                 }
             }
-            persist();
+            persistWithMode("progress", { tournamentId: progressTournamentId });
             renderAll();
             setProgressStatus(`Match rule updated to ${getMatchRuleLabel(state.tournaments[tournamentIndex].matchRule)}.`);
         });
@@ -1093,9 +1103,53 @@ function bindEvents() {
     };
 
     bindBackupControls(elements.backupExportButton, elements.backupImportButton, elements.backupImportInput);
+
+    if (elements.authForm) {
+        elements.authForm.addEventListener("submit", async (event) => {
+            event.preventDefault();
+            const email = elements.authEmail?.value.trim() || "";
+            const password = elements.authPassword?.value || "";
+            if (!email || !password) {
+                setAuthStatus("Enter both email and password.");
+                return;
+            }
+
+            const client = initializeSupabaseClient();
+            if (!client) {
+                setAuthStatus("Supabase is not ready yet.");
+                return;
+            }
+
+            setAuthStatus("Signing in...");
+            const { error } = await client.auth.signInWithPassword({ email, password });
+            if (error) {
+                setAuthStatus(error.message || "Sign-in failed.");
+                return;
+            }
+
+            if (elements.authPassword) {
+                elements.authPassword.value = "";
+            }
+            setAuthStatus("Signed in.");
+        });
+    }
+
+    if (elements.signOutButton) {
+        elements.signOutButton.addEventListener("click", async () => {
+            const client = initializeSupabaseClient();
+            if (!client) {
+                return;
+            }
+            const { error } = await client.auth.signOut();
+            if (error) {
+                setAuthStatus(error.message || "Sign-out failed.");
+            }
+        });
+    }
 }
 
 function renderAll() {
+    setActiveSection(activeSection);
     renderSidebarState();
     renderTournamentForm();
     renderSummary();
@@ -1119,6 +1173,151 @@ function renderAll() {
     renderEditTournamentOptions();
     renderTournamentMode();
     refreshBracketPopup();
+}
+
+function setAuthStatus(message) {
+    if (elements.authStatus) {
+        elements.authStatus.textContent = message || "";
+    }
+}
+
+function isSuperAdmin() {
+    return currentUserRole === "super_admin";
+}
+
+function isProgressUser() {
+    return currentUserRole === "progress_user";
+}
+
+function getAccessibleSections() {
+    if (isSuperAdmin()) {
+        return ["overview", "tournament", "ballot", "bracket", "progress", "standings"];
+    }
+    if (isProgressUser()) {
+        return ["progress"];
+    }
+    return [];
+}
+
+function canAccessSection(section) {
+    return getAccessibleSections().includes(String(section || "").trim());
+}
+
+function setActiveSection(section) {
+    const nextSection = canAccessSection(section) ? section : (getAccessibleSections()[0] || "overview");
+    activeSection = nextSection;
+    elements.navItems.forEach((nav) => {
+        const allowed = canAccessSection(nav.dataset.section);
+        nav.style.display = allowed ? "" : "none";
+        nav.classList.toggle("active", allowed && nav.dataset.section === activeSection);
+    });
+    elements.panels.forEach((panel) => {
+        const allowed = canAccessSection(panel.dataset.section);
+        panel.classList.toggle("active", allowed && panel.dataset.section === activeSection);
+        panel.style.display = allowed ? "" : "none";
+    });
+}
+
+function renderAuthState() {
+    const authenticated = Boolean(currentSession?.user);
+    const authorized = authenticated && Boolean(currentUserRole);
+    document.body.classList.toggle("auth-locked", !authorized);
+    if (elements.authSessionLabel) {
+        elements.authSessionLabel.textContent = authorized
+            ? `${currentSession.user.email || "Signed-in user"} (${currentUserRole})`
+            : "Not signed in";
+    }
+    if (elements.signOutButton) {
+        elements.signOutButton.style.display = authenticated ? "" : "none";
+    }
+    if (!authenticated) {
+        setAuthStatus("Sign in to access tournaments, brackets, and progress data.");
+    } else if (!authorized) {
+        setAuthStatus("This account does not have an app role yet.");
+    }
+}
+
+function clearClientStateForSignOut() {
+    state = cloneState(defaultState);
+    tournamentMode = "";
+    activeTournamentId = "";
+    ballotTournamentId = "";
+    bracketTournamentId = "";
+    progressTournamentId = "";
+    sidebarCollapsed = false;
+    bracketZoom = 1;
+    bracketEditMode = false;
+    bracketDirty = false;
+    bracketDraft = null;
+    selectedBracketSwapSlot = null;
+    remoteStateReady = false;
+    currentUserRole = currentSession?.user ? currentUserRole : "";
+    renderAll();
+}
+
+async function applyAuthSession(session) {
+    currentSession = session || null;
+    if (!currentSession?.user) {
+        currentUserRole = "";
+        renderAuthState();
+        clearClientStateForSignOut();
+        return;
+    }
+
+    const client = initializeSupabaseClient();
+    try {
+        currentUserRole = await fetchCurrentUserRole(client, currentSession.user.id);
+    } catch (error) {
+        console.error(error);
+        currentUserRole = "";
+        setAuthStatus("Signed in, but the app role could not be loaded.");
+    }
+
+    renderAuthState();
+    if (!currentUserRole) {
+        clearClientStateForSignOut();
+        return;
+    }
+
+    activeSection = canAccessSection(activeSection) ? activeSection : getAccessibleSections()[0];
+    renderAll();
+    remoteStateReady = false;
+    await initializeRemotePersistence();
+}
+
+async function initializeAuth() {
+    const client = initializeSupabaseClient();
+    renderAuthState();
+    if (!client) {
+        setAuthStatus("Supabase client could not be initialized.");
+        return;
+    }
+
+    const {
+        data: { session },
+        error,
+    } = await client.auth.getSession();
+    if (error) {
+        setAuthStatus(error.message || "Unable to check session.");
+        return;
+    }
+
+    await applyAuthSession(session);
+    client.auth.onAuthStateChange(async (_event, nextSession) => {
+        await applyAuthSession(nextSession);
+    });
+}
+
+async function fetchCurrentUserRole(client, userId) {
+    const { data, error } = await client
+        .from("user_roles")
+        .select("role")
+        .eq("user_id", userId)
+        .maybeSingle();
+    if (error) {
+        throw error;
+    }
+    return String(data?.role || "").trim();
 }
 
 function renderSidebarState() {
@@ -3491,7 +3690,7 @@ function renderBracketProgress() {
     const autoAdvanced = applyByeAdvancements(autoAdvancedBracket);
     if (autoAdvanced && tournamentIndex !== -1) {
         state.tournaments[tournamentIndex].bracket = autoAdvancedBracket;
-        persist();
+        persistWithMode("progress", { tournamentId: progressTournamentId });
         renderAll();
         return;
     }
@@ -3849,7 +4048,7 @@ function saveBracketProgressResult(key) {
     recomputeSingleEliminationProgress(bracket);
 
     state.tournaments[tournamentIndex].bracket = bracket;
-    persist();
+    persistWithMode("progress", { tournamentId: progressTournamentId });
     renderAll();
     const updatedMatch = state.tournaments[tournamentIndex].bracket.rounds?.[roundIndex]?.matches?.[matchIndex];
     setProgressStatus(`Saved ${updatedMatch?.label || "match"} and updated the next round pairing.`);
@@ -3875,7 +4074,7 @@ function unlockBracketProgressResult(key) {
     match.locked = false;
     match.winnerSide = "";
     state.tournaments[tournamentIndex].bracket = bracket;
-    persist();
+    persistWithMode("progress", { tournamentId: progressTournamentId });
     renderAll();
     setProgressStatus(`Unlocked ${match.label || "match"} for correction.`);
 }
@@ -5573,11 +5772,15 @@ function normalizeHeader(value) {
 }
 
 function persist() {
+    persistWithMode("full");
+}
+
+function persistWithMode(syncMode, options = {}) {
     state.meta = {
         ...(state.meta || {}),
         lastSavedAt: new Date().toISOString(),
     };
-    scheduleRemotePersist();
+    scheduleRemotePersist(false, syncMode, options);
 }
 
 function exportLocalBackup() {
@@ -5625,8 +5828,8 @@ function initializeSupabaseClient() {
     }
     supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
         auth: {
-            persistSession: false,
-            autoRefreshToken: false,
+            persistSession: true,
+            autoRefreshToken: true,
         },
     });
     return supabaseClient;
@@ -5815,6 +6018,14 @@ async function insertRowsInChunks(client, tableName, rows, chunkSize = 500) {
 }
 
 async function fetchSplitStateFromSupabase(client) {
+    const runtimeRequest = isSuperAdmin()
+        ? client
+            .from(SUPABASE_RUNTIME_TABLE)
+            .select("*")
+            .eq("id", SUPABASE_WORKSPACE_ID)
+            .maybeSingle()
+        : Promise.resolve({ data: null, error: null });
+
     const [
         runtimeResponse,
         tournamentsResponse,
@@ -5822,11 +6033,7 @@ async function fetchSplitStateFromSupabase(client) {
         matchesResponse,
         announcementsResponse,
     ] = await Promise.all([
-        client
-            .from(SUPABASE_RUNTIME_TABLE)
-            .select("*")
-            .eq("id", SUPABASE_WORKSPACE_ID)
-            .maybeSingle(),
+        runtimeRequest,
         client
             .from(SUPABASE_TOURNAMENTS_TABLE)
             .select("*")
@@ -5909,7 +6116,7 @@ function legacyTimestampHasData(value) {
 
 async function initializeRemotePersistence() {
     const client = initializeSupabaseClient();
-    if (!client) {
+    if (!client || !currentSession?.user) {
         return;
     }
     try {
@@ -5940,7 +6147,7 @@ async function initializeRemotePersistence() {
             renderAll();
             clearLegacyLocalState();
             remoteStateReady = true;
-            scheduleRemotePersist(true);
+            scheduleRemotePersist(true, "full");
             return;
         }
 
@@ -5948,38 +6155,57 @@ async function initializeRemotePersistence() {
             state = legacyState;
             applyUiState({});
             renderAll();
-            scheduleRemotePersist(true);
+            scheduleRemotePersist(true, "full");
         }
 
         remoteStateReady = true;
-        scheduleRemotePersist(true);
+        scheduleRemotePersist(true, "full");
     } catch (error) {
         console.warn("Supabase is unavailable, so the app cannot load or save remote tournament data right now.", error);
     }
 }
 
-function scheduleRemotePersist(force = false) {
-    if (!initializeSupabaseClient()) {
+let pendingRemoteSync = { mode: "full", options: {} };
+
+function scheduleRemotePersist(force = false, syncMode = "full", options = {}) {
+    if (!initializeSupabaseClient() || !currentSession?.user) {
         return;
     }
     if (!force && !remoteStateReady) {
         return;
+    }
+    if (pendingRemoteSync.mode !== "full") {
+        pendingRemoteSync = { mode: syncMode, options: cloneState(options) };
+    }
+    if (syncMode === "full") {
+        pendingRemoteSync = { mode: "full", options: cloneState(options) };
     }
     if (remoteSyncTimer) {
         clearTimeout(remoteSyncTimer);
     }
     remoteSyncTimer = window.setTimeout(() => {
         remoteSyncTimer = null;
-        remoteSyncInFlight = pushStateToSupabase();
+        const nextSync = pendingRemoteSync;
+        pendingRemoteSync = { mode: "full", options: {} };
+        remoteSyncInFlight = pushStateToSupabase(nextSync.mode, nextSync.options);
     }, force ? 0 : 350);
 }
 
-async function pushStateToSupabase() {
+async function pushStateToSupabase(syncMode = "full", options = {}) {
     const client = initializeSupabaseClient();
-    if (!client) {
+    if (!client || !currentSession?.user) {
         return;
     }
     try {
+        if (isProgressUser()) {
+            if (syncMode !== "progress") {
+                throw new Error("This account can only save bracket progress updates.");
+            }
+            await pushBracketProgressToSupabase(client, options.tournamentId);
+            remoteStateReady = true;
+            return;
+        }
+
         const tournaments = Array.isArray(state.tournaments) ? state.tournaments : [];
         const tournamentRows = tournaments.map(serializeTournamentRow);
         const playerRows = tournaments.flatMap((tournament) => serializeTournamentPlayerRows(tournament));
@@ -6043,6 +6269,27 @@ async function pushStateToSupabase() {
         clearLegacyLocalState();
     } catch (error) {
         console.warn("Supabase sync failed, so the latest changes could not be stored remotely.", error);
+    }
+}
+
+async function pushBracketProgressToSupabase(client, tournamentId) {
+    const normalizedId = String(tournamentId || "").trim();
+    if (!normalizedId) {
+        throw new Error("Bracket progress sync is missing a tournament id.");
+    }
+
+    const tournamentIndex = state.tournaments.findIndex((item) => item.id === normalizedId);
+    if (tournamentIndex === -1) {
+        throw new Error("The selected tournament could not be found for progress sync.");
+    }
+
+    const tournament = state.tournaments[tournamentIndex];
+    const row = serializeTournamentRow(tournament, tournamentIndex);
+    const { error } = await client
+        .from(SUPABASE_TOURNAMENTS_TABLE)
+        .upsert(row, { onConflict: "workspace_id,id" });
+    if (error) {
+        throw error;
     }
 }
 

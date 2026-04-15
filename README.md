@@ -62,6 +62,7 @@ If older tournament data still exists in the browser from a previous localStorag
 1. Open your Supabase project SQL editor.
 2. Run `supabase-schema.sql`.
 3. Keep the app served from this folder so the bundled Supabase URL and publishable key in `script.js` can connect.
+4. Create at least one Supabase Auth user with email/password so the app can sign in.
 
 The app now uses split Supabase tables:
 
@@ -72,6 +73,38 @@ The app now uses split Supabase tables:
 - `public.tournament_announcements` for saved announcements
 
 `public.app_state` remains only as a legacy migration source for older single-row installs.
+
+## Authentication
+
+This version now expects a signed-in Supabase user before it will load or save tournament data.
+
+- Open the app
+- Sign in with a Supabase email/password user
+- Then the app loads tournaments and enables saving
+
+The included SQL policies restrict tournament data tables to the `authenticated` role.
+
+## Roles
+
+This version supports two app roles through the `public.user_roles` table:
+
+- `super_admin`
+  - full access to all menus and all tournament data
+- `progress_user`
+  - access only to `Bracket Progress`
+  - can read tournament data and save bracket progress updates
+
+Create the Supabase Auth users first, then assign roles in SQL. Example:
+
+```sql
+insert into public.user_roles (user_id, role)
+values
+  ('YOUR-SUPABASE-USER-UUID-1', 'super_admin'),
+  ('YOUR-SUPABASE-USER-UUID-2', 'progress_user')
+on conflict (user_id) do update
+set role = excluded.role,
+    updated_at = timezone('utc', now());
+```
 
 ## Import format
 
