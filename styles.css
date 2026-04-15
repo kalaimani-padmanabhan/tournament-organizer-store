@@ -25,6 +25,10 @@ body {
 button, input, select, textarea { font: inherit; }
 .page-shell { width: min(1220px, calc(100% - 28px)); margin: 0 auto; padding: 20px 0 28px; }
 .site-header, .sidebar, .panel, .item-card, .table-wrap { border: 1px solid var(--line); border-radius: 24px; background: var(--surface); box-shadow: var(--shadow); }
+.mobile-nav-button,
+.sidebar-scrim {
+    display: none;
+}
 
 body.auth-locked .page-shell {
     display: none;
@@ -72,6 +76,16 @@ body.auth-locked .auth-shell {
 }
 
 .brand { display: flex; align-items: center; gap: 14px; }
+.mobile-nav-button {
+    min-height: 42px;
+    padding: 0 16px;
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    background: rgba(255, 255, 255, 0.05);
+    color: var(--text);
+    cursor: pointer;
+    font-weight: 700;
+}
 .brand-mark {
     display: grid;
     place-items: center;
@@ -100,6 +114,24 @@ body.auth-locked .auth-shell {
     align-self: start;
     position: sticky;
     top: 18px;
+    z-index: 12;
+}
+
+.sidebar-scrim {
+    position: fixed;
+    inset: 0;
+    border: 0;
+    background: rgba(2, 8, 15, 0.62);
+    backdrop-filter: blur(3px);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 180ms ease;
+    z-index: 11;
+}
+
+.sidebar-scrim.active {
+    opacity: 1;
+    pointer-events: auto;
 }
 
 .sidebar-toggle {
@@ -901,20 +933,189 @@ tbody .icon-button {
 .small { padding: 16px; }
 
 @media (max-width: 980px) {
+    .page-shell {
+        width: min(100%, calc(100% - 20px));
+        padding: 12px 0 22px;
+    }
     .app-grid, .dashboard-grid, .stat-grid, .card-list, .form-grid { grid-template-columns: 1fr; }
-    .sidebar { position: static; }
+    .app-grid {
+        grid-template-columns: 1fr;
+        position: relative;
+    }
+    .mobile-nav-button,
+    .sidebar-scrim,
+    .sidebar-toggle {
+        display: none;
+    }
+    .sidebar {
+        position: static;
+        top: auto;
+        left: auto;
+        bottom: auto;
+        width: 100%;
+        max-width: none;
+        overflow: auto hidden;
+        transform: none;
+        transition: none;
+        align-self: stretch;
+        z-index: auto;
+        display: flex;
+        gap: 10px;
+        padding: 12px;
+        white-space: nowrap;
+    }
+    .content {
+        min-width: 0;
+    }
     .span-2 { grid-column: span 1; }
-    .site-header, .panel-heading { flex-direction: column; align-items: start; }
+    .site-header, .panel-heading { flex-direction: column; align-items: stretch; }
+    .site-header {
+        padding: 14px 16px;
+        gap: 14px;
+    }
+    .brand {
+        justify-content: space-between;
+    }
+    .header-summary {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 10px;
+    }
+    .nav-item {
+        width: auto;
+        min-width: max-content;
+        margin-bottom: 0;
+        padding: 0 16px;
+        flex: 0 0 auto;
+    }
+    .header-summary div,
+    .auth-session-copy {
+        min-width: 0;
+    }
+    .auth-actions,
+    .header-actions,
+    .export-actions,
+    .bracket-actions,
+    .bracket-toolbar {
+        width: 100%;
+    }
+    .auth-actions,
+    .header-actions {
+        justify-content: stretch;
+    }
+    .auth-actions {
+        flex-wrap: wrap;
+    }
+    .button,
+    .icon-button {
+        min-height: 44px;
+    }
+    .panel,
+    .panel-card,
+    .item-card {
+        padding: 16px;
+    }
+    .form-grid,
+    .compact-form {
+        gap: 12px;
+    }
+    .table-wrap {
+        border-radius: 18px;
+    }
+    th, td {
+        padding: 12px 10px;
+        white-space: nowrap;
+    }
     .header-summary { flex-wrap: wrap; gap: 16px; }
     .bracket-toolbar { align-items: stretch; }
     .bracket-picker { max-width: none; }
+    .bracket-actions .button,
+    .header-actions .button,
+    .export-actions .button {
+        flex: 1 1 180px;
+    }
+    .players-summary {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
     .section-panel[data-section="bracket"] .players-summary {
         grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+    .section-panel[data-section="progress"] .progress-action-cell {
+        min-width: 230px;
+    }
+    .section-panel[data-section="progress"] table {
+        min-width: 980px;
+    }
+    .section-panel[data-section="ballot"] table,
+    .section-panel[data-section="tournament"] table,
+    .section-panel[data-section="overview"] table,
+    .section-panel[data-section="standings"] table {
+        min-width: 720px;
     }
 }
 
 @media (max-width: 640px) {
-    .page-shell { width: min(100% - 18px, 1220px); }
+    .page-shell { width: min(100% - 14px, 1220px); }
+    .site-header {
+        border-radius: 20px;
+    }
+    .brand {
+        gap: 10px;
+    }
+    .brand-mark {
+        width: 42px;
+        height: 42px;
+        border-radius: 14px;
+    }
+    .brand-copy strong {
+        font-size: 0.98rem;
+    }
+    .brand-copy small {
+        font-size: 0.76rem;
+    }
+    .header-summary {
+        grid-template-columns: 1fr;
+    }
+    .players-summary,
+    .section-panel[data-section="bracket"] .players-summary {
+        grid-template-columns: 1fr;
+    }
+    .auth-actions,
+    .header-actions,
+    .export-actions,
+    .bracket-actions {
+        flex-direction: column;
+        align-items: stretch;
+    }
+    .bracket-picker {
+        min-width: 0;
+        flex-basis: 100%;
+    }
+    .panel,
+    .panel-card,
+    .item-card {
+        padding: 14px;
+        border-radius: 18px;
+    }
+    .panel-heading {
+        gap: 12px;
+        margin-bottom: 16px;
+    }
+    .sidebar {
+        gap: 8px;
+        padding: 10px;
+    }
+    .nav-item {
+        min-height: 42px;
+        padding: 0 14px;
+        font-size: 0.88rem;
+    }
+    .table-wrap {
+        margin-inline: -4px;
+    }
+    .section-panel[data-section="progress"] table {
+        min-width: 920px;
+    }
     .score-grid { grid-template-columns: 1fr; }
 }
 

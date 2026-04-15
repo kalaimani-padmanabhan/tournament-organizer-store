@@ -489,6 +489,7 @@ let currentSession = null;
 let currentUserRole = "";
 let activeSection = "overview";
 let progressReminderIntervalId = null;
+let mobileNavOpen = false;
 let bracketEditMode = false;
 let bracketDirty = false;
 let bracketDraft = null;
@@ -503,6 +504,8 @@ const elements = {
     panels: document.querySelectorAll(".section-panel"),
     sidebar: document.getElementById("sidebar"),
     sidebarToggleButton: document.getElementById("sidebarToggleButton"),
+    mobileNavButton: document.getElementById("mobileNavButton"),
+    sidebarScrim: document.getElementById("sidebarScrim"),
     summaryTournament: document.getElementById("summaryTournament"),
     summaryTeams: document.getElementById("summaryTeams"),
     summaryMatches: document.getElementById("summaryMatches"),
@@ -609,10 +612,28 @@ initializeAuth();
 startProgressReminderRefresh();
 
 function bindEvents() {
+    window.addEventListener("resize", handleViewportResize);
+
     if (elements.sidebarToggleButton) {
         elements.sidebarToggleButton.addEventListener("click", () => {
+            if (isCompactViewport()) {
+                setMobileNavOpen(!mobileNavOpen);
+                return;
+            }
             sidebarCollapsed = !sidebarCollapsed;
             renderSidebarState();
+        });
+    }
+
+    if (elements.mobileNavButton) {
+        elements.mobileNavButton.addEventListener("click", () => {
+            setMobileNavOpen(!mobileNavOpen);
+        });
+    }
+
+    if (elements.sidebarScrim) {
+        elements.sidebarScrim.addEventListener("click", () => {
+            setMobileNavOpen(false);
         });
     }
 
@@ -623,6 +644,9 @@ function bindEvents() {
                 return;
             }
             setActiveSection(section);
+            if (isCompactViewport()) {
+                setMobileNavOpen(false);
+            }
         });
     });
 
@@ -1151,6 +1175,9 @@ function bindEvents() {
 }
 
 function renderAll() {
+    if (!isCompactViewport() && mobileNavOpen) {
+        mobileNavOpen = false;
+    }
     setActiveSection(activeSection);
     renderSidebarState();
     renderTournamentForm();
@@ -1187,6 +1214,30 @@ function startProgressReminderRefresh() {
         }
         renderBracketProgress();
     }, 60000);
+}
+
+function isCompactViewport() {
+    return window.matchMedia("(max-width: 980px)").matches;
+}
+
+function setMobileNavOpen(nextOpen) {
+    mobileNavOpen = Boolean(nextOpen && isCompactViewport());
+    renderSidebarState();
+}
+
+function handleViewportResize() {
+    if (!isCompactViewport() && mobileNavOpen) {
+        mobileNavOpen = false;
+        renderSidebarState();
+    }
+}
+
+function getResponsivePopupFeatures(defaultWidth, defaultHeight) {
+    const availableWidth = Math.max(360, Number(window.screen?.availWidth || window.innerWidth || defaultWidth));
+    const availableHeight = Math.max(540, Number(window.screen?.availHeight || window.innerHeight || defaultHeight));
+    const popupWidth = Math.min(defaultWidth, availableWidth - 24);
+    const popupHeight = Math.min(defaultHeight, availableHeight - 24);
+    return `width=${Math.round(popupWidth)},height=${Math.round(popupHeight)},resizable=yes,scrollbars=yes`;
 }
 
 function setAuthStatus(message) {
@@ -1339,10 +1390,28 @@ function renderSidebarState() {
         return;
     }
 
-    elements.sidebar.classList.toggle("collapsed", sidebarCollapsed);
-    elements.pageShell.classList.toggle("sidebar-collapsed", sidebarCollapsed);
-    elements.sidebarToggleButton.textContent = sidebarCollapsed ? ">" : "<";
-    elements.sidebarToggleButton.setAttribute("aria-label", sidebarCollapsed ? "Expand menu" : "Collapse menu");
+    const compactViewport = isCompactViewport();
+    elements.sidebar.classList.toggle("collapsed", !compactViewport && sidebarCollapsed);
+    elements.sidebar.classList.toggle("mobile-open", compactViewport && mobileNavOpen);
+    elements.pageShell.classList.toggle("sidebar-collapsed", !compactViewport && sidebarCollapsed);
+    document.body.classList.toggle("sidebar-open", compactViewport && mobileNavOpen);
+
+    if (compactViewport) {
+        elements.sidebarToggleButton.textContent = mobileNavOpen ? "Close" : "Menu";
+        elements.sidebarToggleButton.setAttribute("aria-label", mobileNavOpen ? "Close menu" : "Open menu");
+    } else {
+        elements.sidebarToggleButton.textContent = sidebarCollapsed ? ">" : "<";
+        elements.sidebarToggleButton.setAttribute("aria-label", sidebarCollapsed ? "Expand menu" : "Collapse menu");
+    }
+
+    if (elements.mobileNavButton) {
+        elements.mobileNavButton.setAttribute("aria-expanded", compactViewport && mobileNavOpen ? "true" : "false");
+        elements.mobileNavButton.textContent = compactViewport && mobileNavOpen ? "Close" : "Menu";
+    }
+
+    if (elements.sidebarScrim) {
+        elements.sidebarScrim.classList.toggle("active", compactViewport && mobileNavOpen);
+    }
 }
 
 function addManualPlayer() {
@@ -3275,7 +3344,7 @@ function openBracketWindow(tournament, bracket) {
 
     const bracketWindow = bracketPopupRef && !bracketPopupRef.closed
         ? bracketPopupRef
-        : window.open("", "bracket-preview-window", "width=1400,height=900,resizable=yes,scrollbars=yes");
+        : window.open("", "bracket-preview-window", getResponsivePopupFeatures(1400, 900));
     if (!bracketWindow) {
         setBracketStatus("The new bracket window was blocked. Please allow pop-ups for this page and try again.");
         return;
@@ -3405,6 +3474,43 @@ function openBracketWindow(tournament, bracket) {
                     background: var(--surface);
                     overflow: auto;
                     min-height: 0;
+                }
+                @media (max-width: 900px) {
+                    body {
+                        padding: 8px;
+                    }
+                    .shell {
+                        height: auto;
+                        min-height: calc(100vh - 16px);
+                    }
+                    .header {
+                        flex-direction: column;
+                        align-items: stretch;
+                    }
+                    .toolbar {
+                        display: grid;
+                        grid-template-columns: 1fr;
+                    }
+                    .toolbar button {
+                        width: 100%;
+                    }
+                    .stats {
+                        grid-template-columns: repeat(2, minmax(0, 1fr));
+                    }
+                    .canvas {
+                        padding: 8px;
+                    }
+                }
+                @media (max-width: 640px) {
+                    .stats {
+                        grid-template-columns: 1fr;
+                    }
+                    .header h1 {
+                        font-size: 18px;
+                    }
+                    .header p {
+                        font-size: 12px;
+                    }
                 }
                 .double-bracket-layout {
                     display: grid;
@@ -4116,7 +4222,7 @@ async function openProgressScoreSheet(key) {
         return;
     }
     const title = `${tournament.name} - ${tournament.category} - ${match.label || "Match"}`;
-    const sheetWindow = window.open("", "bracket-score-sheet", "width=900,height=700,resizable=yes,scrollbars=yes");
+    const sheetWindow = window.open("", "bracket-score-sheet", getResponsivePopupFeatures(900, 700));
     if (!sheetWindow) {
         setProgressStatus("The score sheet window was blocked. Please allow pop-ups for this page.");
         return;
@@ -4186,6 +4292,14 @@ async function openProgressScoreSheet(key) {
                 tr[data-row="12"] td,
                 tr[data-row="14"] td {
                     white-space: nowrap;
+                }
+                @media (max-width: 900px) {
+                    body {
+                        padding: 8px;
+                    }
+                    .sheet {
+                        padding: 0 0 8px;
+                    }
                 }
                 @media print {
                     html, body { margin: 0 !important; padding: 0 !important; }
