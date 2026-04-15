@@ -1,6 +1,6 @@
 # BracketBase Tournament Website
 
-A browser-based tournament organizer that works without a backend.
+A browser-based tournament organizer with Supabase as the primary app database.
 
 ## What it does
 
@@ -9,17 +9,19 @@ A browser-based tournament organizer that works without a backend.
 - import players from Excel CSV
 - keep a simple knockout ranking view
 - post organizer announcements
-- keep data in browser storage so it survives refreshes
+- store all app state in Supabase
+- export and import manual JSON backups
 
 ## Files
 
 - `index.html` - app layout
 - `styles.css` - responsive styling
-- `script.js` - app logic and local storage persistence
+- `script.js` - app logic, Supabase persistence, and backup import/export
+- `supabase-schema.sql` - table and RLS setup for Supabase
 
 ## Open locally
 
-Open `index.html` directly in your browser.
+Open `index.html` directly in your browser, or serve the folder with a small local web server.
 
 ## Publish on GitHub Pages
 
@@ -47,15 +49,29 @@ Your site URL will usually be:
 
 - `https://<your-github-username>.github.io/<repository-name>/`
 
-Important:
-
-- The app stores tournament data in browser `localStorage`.
-- That means the website code is online, but the data is still separate on each device/browser.
-- If you need the same tournaments on tablet and PC, the next step is adding an online database such as `Supabase`.
-
 ## Storage
 
-This version stores all data in your browser using `localStorage`.
+This version stores tournaments, menus, brackets, ballot data, bracket progress, and related app state in Supabase.
+
+The browser no longer acts as the database. `Export Backup` and `Import Backup` are manual JSON tools for portability and recovery.
+
+If older tournament data still exists in the browser from a previous localStorage version, the app can migrate it once into Supabase and then clears the old browser copy.
+
+## Supabase setup
+
+1. Open your Supabase project SQL editor.
+2. Run `supabase-schema.sql`.
+3. Keep the app served from this folder so the bundled Supabase URL and publishable key in `script.js` can connect.
+
+The app now uses split Supabase tables:
+
+- `public.app_runtime_state` for the current working draft and menu selections
+- `public.tournaments` for saved tournaments
+- `public.tournament_players` for players mapped to each tournament
+- `public.tournament_matches` for saved match rows
+- `public.tournament_announcements` for saved announcements
+
+`public.app_state` remains only as a legacy migration source for older single-row installs.
 
 ## Import format
 
@@ -84,6 +100,6 @@ It also supports your current Google Form CSV headers directly, including:
 ## Good next upgrades
 
 - add real user login
-- sync data to a database
+- split the single JSON payload into tournament, player, and bracket tables
 - generate knockout brackets automatically
 - add printable fixtures and score sheets

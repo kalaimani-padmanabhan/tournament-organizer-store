@@ -8,6 +8,7 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=Sora:wght@600;700;800&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="styles.css">
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 </head>
 <body>
     <div class="page-shell">
@@ -39,7 +40,12 @@
                 <section class="panel section-panel active" data-section="overview">
                     <div class="panel-heading">
                         <div><p class="eyebrow">Organizer Control Center</p></div>
-                        <button class="button ghost" id="resetAppButton" type="button">Reset Demo Data</button>
+                        <div class="header-actions">
+                            <button class="button ghost" id="backupExportButton" type="button">Export Backup</button>
+                            <button class="button ghost" id="backupImportButton" type="button">Import Backup</button>
+                            <input id="backupImportInput" type="file" accept=".json,application/json" style="display:none">
+                            <button class="button ghost" id="resetAppButton" type="button">Reset Demo Data</button>
+                        </div>
                     </div>
                     <div class="panel-card import-card">
                         <div class="card-header">
@@ -56,6 +62,7 @@
                                         <th>Format</th>
                                         <th>Players</th>
                                         <th>Status</th>
+                                        <th>Action</th>
                                     </tr>
                                 </thead>
                                 <tbody id="overviewTournamentList"></tbody>

@@ -1,4 +1,14 @@
 const STORAGE_KEY = "bracketbase-state-v1";
+const SUPABASE_URL = "https://baddrupmhmagkfebcobk.supabase.co";
+const SUPABASE_ANON_KEY = "sb_publishable_t_YBZha2t0oPhM1Fxlr6Zg_eT3P8qc-";
+const SUPABASE_WORKSPACE_ID = "primary";
+const SUPABASE_STATE_TABLE = "app_state";
+const SUPABASE_STATE_ROW_ID = "primary";
+const SUPABASE_RUNTIME_TABLE = "app_runtime_state";
+const SUPABASE_TOURNAMENTS_TABLE = "tournaments";
+const SUPABASE_TOURNAMENT_PLAYERS_TABLE = "tournament_players";
+const SUPABASE_TOURNAMENT_MATCHES_TABLE = "tournament_matches";
+const SUPABASE_TOURNAMENT_ANNOUNCEMENTS_TABLE = "tournament_announcements";
 
 const defaultState = {
     tournament: {
@@ -18,6 +28,9 @@ const defaultState = {
     teams: [],
     matches: [],
     announcements: [],
+    meta: {
+        lastSavedAt: "",
+    },
 };
 
 const SCORE_SHEET_TEMPLATE = {
@@ -461,13 +474,17 @@ const SCORE_SHEET_TEMPLATE = {
     }
 };
 
-let state = loadState();
+let state = cloneState(defaultState);
 let tournamentMode = "";
 let activeTournamentId = "";
 let ballotTournamentId = "";
 let bracketTournamentId = "";
 let bracketZoom = 1;
 let sidebarCollapsed = false;
+let supabaseClient = null;
+let remoteSyncTimer = null;
+let remoteSyncInFlight = null;
+let remoteStateReady = false;
 let bracketEditMode = false;
 let bracketDirty = false;
 let bracketDraft = null;
@@ -568,12 +585,16 @@ const elements = {
     announcementText: document.getElementById("announcementText"),
     announcementsList: document.getElementById("announcementsList"),
     resetAppButton: document.getElementById("resetAppButton"),
+    backupExportButton: document.getElementById("backupExportButton"),
+    backupImportButton: document.getElementById("backupImportButton"),
+    backupImportInput: document.getElementById("backupImportInput"),
     teamCardTemplate: document.getElementById("teamCardTemplate"),
     announcementTemplate: document.getElementById("announcementTemplate"),
 };
 
 bindEvents();
 renderAll();
+initializeRemotePersistence();
 
 function bindEvents() {
     if (elements.sidebarToggleButton) {
@@ -981,7 +1002,7 @@ function bindEvents() {
     }
 
     if (elements.progressTableBody) {
-        elements.progressTableBody.addEventListener("click", (event) => {
+    elements.progressTableBody.addEventListener("click", (event) => {
             const sheetButton = event.target.closest("[data-progress-sheet]");
             if (sheetButton) {
                 openProgressScoreSheet(sheetButton.dataset.progressSheet || "");
@@ -997,6 +1018,17 @@ function bindEvents() {
                 return;
             }
             saveBracketProgressResult(button.dataset.progressSave || "");
+        });
+    }
+
+    if (elements.overviewTournamentList) {
+        elements.overviewTournamentList.addEventListener("click", (event) => {
+            const deleteButton = event.target.closest("[data-overview-delete]");
+            if (!deleteButton) {
+                return;
+            }
+
+            removeTournamentEntry(deleteButton.dataset.overviewDelete || "");
         });
     }
 
@@ -1020,12 +1052,47 @@ function bindEvents() {
     }
 
     elements.resetAppButton.addEventListener("click", () => {
-        state = cloneState(defaultState);
+        resetWorkingTournament();
         tournamentMode = "";
-        activeTournamentId = "";
+        ballotTournamentId = "";
+        bracketTournamentId = "";
+        progressTournamentId = "";
+        setTournamentModeStatus("");
         persist();
         renderAll();
     });
+
+    const bindBackupControls = (exportButton, importButton, importInput) => {
+        if (exportButton) {
+            exportButton.addEventListener("click", () => {
+                exportLocalBackup();
+            });
+        }
+
+        if (importButton && importInput) {
+            importButton.addEventListener("click", () => {
+                importInput.value = "";
+                importInput.click();
+            });
+
+            importInput.addEventListener("change", async () => {
+                const file = importInput.files?.[0];
+                if (!file) {
+                    return;
+                }
+                try {
+                    const text = await file.text();
+                    importLocalBackup(text);
+                    renderAll();
+                } catch (error) {
+                    console.error(error);
+                    window.alert("Backup import failed. Please check the JSON file.");
+                }
+            });
+        }
+    };
+
+    bindBackupControls(elements.backupExportButton, elements.backupImportButton, elements.backupImportInput);
 }
 
 function renderAll() {
@@ -1244,6 +1311,47 @@ function saveTournamentEntry() {
     }
 
     activeTournamentId = entry.id;
+}
+
+function removeTournamentEntry(tournamentId) {
+    const normalizedId = String(tournamentId || "").trim();
+    if (!normalizedId) {
+        return;
+    }
+
+    const tournament = state.tournaments.find((item) => item.id === normalizedId);
+    if (!tournament) {
+        return;
+    }
+
+    const confirmed = window.confirm(`Delete tournament "${tournament.name}" and all its related data?`);
+    if (!confirmed) {
+        return;
+    }
+
+    state.tournaments = state.tournaments.filter((item) => item.id !== normalizedId);
+
+    if (activeTournamentId === normalizedId) {
+        resetWorkingTournament();
+        tournamentMode = "";
+    }
+    if (ballotTournamentId === normalizedId) {
+        ballotTournamentId = "";
+    }
+    if (bracketTournamentId === normalizedId) {
+        bracketTournamentId = "";
+        bracketEditMode = false;
+        bracketDirty = false;
+        bracketDraft = null;
+        selectedBracketSwapSlot = null;
+    }
+    if (progressTournamentId === normalizedId) {
+        progressTournamentId = "";
+    }
+
+    persist();
+    renderAll();
+    setTournamentModeStatus(`Deleted tournament ${tournament.name}.`);
 }
 
 function importPlayersFromCsv(csvText, sourceLabel) {
@@ -4958,6 +5066,23 @@ function normalizeTeams(teams) {
         : [];
 }
 
+function normalizeMatches(matches) {
+    return Array.isArray(matches)
+        ? matches.map((match) => ({
+            ...match,
+        }))
+        : [];
+}
+
+function normalizeAnnouncements(announcements) {
+    return Array.isArray(announcements)
+        ? announcements.map((announcement) => ({
+            id: announcement.id || createId(),
+            message: announcement.message || "",
+        }))
+        : [];
+}
+
 function isMatchCompleted(match) {
     return match.scoreA !== "" && match.scoreB !== "";
 }
@@ -4971,7 +5096,46 @@ function formatDateTime(date, time) {
     return [date, time].filter(Boolean).join(" ");
 }
 
+function normalizeLoadedState(parsed) {
+    return {
+        tournament: {
+            name: formatTournamentName(parsed?.tournament?.name || "", parsed?.tournament?.category || ""),
+            format: parsed?.tournament?.format || "League",
+            matchRule: parsed?.tournament?.matchRule || "single_25",
+            category: parsed?.tournament?.category || "",
+            notes: parsed?.tournament?.notes || "",
+        },
+        tournaments: Array.isArray(parsed?.tournaments)
+            ? parsed.tournaments.map((item) => ({
+                id: item.id || createId(),
+                name: formatTournamentName(item.name || "", item.category || ""),
+                format: item.format || "League",
+                matchRule: item.matchRule || "single_25",
+                category: item.category || "",
+                notes: item.notes || "",
+                playerCount: Number(item.playerCount || 0),
+                teams: normalizeTeams(item.teams),
+                importMeta: normalizeImportMeta(item.importMeta),
+                matches: normalizeMatches(item.matches),
+                announcements: normalizeAnnouncements(item.announcements),
+                bracket: normalizeBracketState(item.bracket),
+            }))
+            : [],
+        importMeta: normalizeImportMeta(parsed?.importMeta),
+        teams: normalizeTeams(parsed?.teams),
+        matches: normalizeMatches(parsed?.matches),
+        announcements: normalizeAnnouncements(parsed?.announcements),
+        meta: {
+            lastSavedAt: parsed?.meta?.lastSavedAt || "",
+        },
+    };
+}
+
 function loadState() {
+    return cloneState(defaultState);
+}
+
+function loadLegacyLocalState() {
     const raw = window.localStorage.getItem(STORAGE_KEY);
     if (!raw) {
         return cloneState(defaultState);
@@ -4979,37 +5143,17 @@ function loadState() {
 
     try {
         const parsed = JSON.parse(raw);
-        return {
-            tournament: {
-                name: formatTournamentName(parsed.tournament?.name || "", parsed.tournament?.category || ""),
-                format: parsed.tournament?.format || "League",
-                matchRule: parsed.tournament?.matchRule || "single_25",
-                category: parsed.tournament?.category || "",
-                notes: parsed.tournament?.notes || "",
-            },
-            tournaments: Array.isArray(parsed.tournaments)
-                ? parsed.tournaments.map((item) => ({
-                    id: item.id || createId(),
-                    name: formatTournamentName(item.name || "", item.category || ""),
-                    format: item.format || "League",
-                    matchRule: item.matchRule || "single_25",
-                    category: item.category || "",
-                    notes: item.notes || "",
-                    playerCount: Number(item.playerCount || 0),
-                    teams: normalizeTeams(item.teams),
-                    importMeta: normalizeImportMeta(item.importMeta),
-                    matches: Array.isArray(item.matches) ? item.matches : [],
-                    announcements: Array.isArray(item.announcements) ? item.announcements : [],
-                    bracket: normalizeBracketState(item.bracket),
-                }))
-                : [],
-            importMeta: normalizeImportMeta(parsed.importMeta),
-            teams: normalizeTeams(parsed.teams),
-            matches: Array.isArray(parsed.matches) ? parsed.matches : [],
-            announcements: Array.isArray(parsed.announcements) ? parsed.announcements : [],
-        };
+        return normalizeLoadedState(parsed);
     } catch {
         return cloneState(defaultState);
+    }
+}
+
+function clearLegacyLocalState() {
+    try {
+        window.localStorage.removeItem(STORAGE_KEY);
+    } catch (error) {
+        console.warn("Legacy local tournament data could not be cleared.", error);
     }
 }
 
@@ -5429,7 +5573,477 @@ function normalizeHeader(value) {
 }
 
 function persist() {
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+    state.meta = {
+        ...(state.meta || {}),
+        lastSavedAt: new Date().toISOString(),
+    };
+    scheduleRemotePersist();
+}
+
+function exportLocalBackup() {
+    const now = new Date();
+    const stamp = [
+        now.getFullYear(),
+        String(now.getMonth() + 1).padStart(2, "0"),
+        String(now.getDate()).padStart(2, "0"),
+        "-",
+        String(now.getHours()).padStart(2, "0"),
+        String(now.getMinutes()).padStart(2, "0"),
+    ].join("");
+    const fileName = `tournament-backup-${stamp}.json`;
+    const payload = JSON.stringify(state, null, 2);
+    const blob = new Blob([payload], { type: "application/json;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = fileName;
+    link.click();
+    URL.revokeObjectURL(url);
+}
+
+function importLocalBackup(jsonText) {
+    if (!jsonText) {
+        return;
+    }
+    let parsed;
+    try {
+        parsed = JSON.parse(jsonText);
+    } catch {
+        throw new Error("Invalid JSON");
+    }
+    if (!parsed || typeof parsed !== "object") {
+        throw new Error("Invalid backup format");
+    }
+
+    state = normalizeLoadedState(parsed);
+    persist();
+}
+
+function initializeSupabaseClient() {
+    if (supabaseClient || !window.supabase?.createClient || !SUPABASE_URL || !SUPABASE_ANON_KEY) {
+        return supabaseClient;
+    }
+    supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+        auth: {
+            persistSession: false,
+            autoRefreshToken: false,
+        },
+    });
+    return supabaseClient;
+}
+
+function getStateTimestamp(value) {
+    const timestamp = String(value?.meta?.lastSavedAt || "").trim();
+    const parsed = timestamp ? Date.parse(timestamp) : NaN;
+    return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function serializeUiState() {
+    return {
+        tournamentMode,
+        activeTournamentId,
+        ballotTournamentId,
+        bracketTournamentId,
+        progressTournamentId,
+        sidebarCollapsed,
+        bracketZoom,
+    };
+}
+
+function applyUiState(uiState) {
+    tournamentMode = String(uiState?.tournamentMode || "").trim();
+    activeTournamentId = String(uiState?.activeTournamentId || "").trim();
+    ballotTournamentId = String(uiState?.ballotTournamentId || "").trim();
+    bracketTournamentId = String(uiState?.bracketTournamentId || "").trim();
+    progressTournamentId = String(uiState?.progressTournamentId || "").trim();
+    sidebarCollapsed = Boolean(uiState?.sidebarCollapsed);
+    bracketZoom = Number.isFinite(Number(uiState?.bracketZoom))
+        ? Math.min(1.8, Math.max(0.6, Number(uiState.bracketZoom)))
+        : 1;
+}
+
+function serializeTournamentRow(tournament, index) {
+    return {
+        workspace_id: SUPABASE_WORKSPACE_ID,
+        id: tournament.id,
+        name: tournament.name || "",
+        format: tournament.format || "League",
+        match_rule: tournament.matchRule || "single_25",
+        category: tournament.category || "",
+        notes: tournament.notes || "",
+        player_count: Number(tournament.playerCount || 0),
+        import_meta: normalizeImportMeta(tournament.importMeta),
+        bracket: tournament.bracket ? cloneState(tournament.bracket) : null,
+        sort_order: index,
+        updated_at: new Date().toISOString(),
+    };
+}
+
+function serializeTournamentPlayerRows(tournament) {
+    return normalizeTeams(tournament.teams).map((team, index) => ({
+        workspace_id: SUPABASE_WORKSPACE_ID,
+        id: team.id,
+        tournament_id: tournament.id,
+        name: team.name || "",
+        contact: team.contact || "",
+        registration_number: team.registrationNumber || "",
+        aadhar: team.aadhar || "",
+        organization: team.organization || "",
+        category: team.category || "",
+        source: team.source || "",
+        sort_order: index,
+        updated_at: new Date().toISOString(),
+    }));
+}
+
+function serializeTournamentMatchRows(tournament) {
+    return normalizeMatches(tournament.matches).map((match, index) => ({
+        workspace_id: SUPABASE_WORKSPACE_ID,
+        id: match.id || `${tournament.id}-match-${index + 1}`,
+        tournament_id: tournament.id,
+        team_a: match.teamA || "",
+        team_b: match.teamB || "",
+        payload: cloneState(match),
+        sort_order: index,
+        updated_at: new Date().toISOString(),
+    }));
+}
+
+function serializeTournamentAnnouncementRows(tournament) {
+    return normalizeAnnouncements(tournament.announcements).map((announcement, index) => ({
+        workspace_id: SUPABASE_WORKSPACE_ID,
+        id: announcement.id,
+        tournament_id: tournament.id,
+        message: announcement.message || "",
+        payload: cloneState(announcement),
+        sort_order: index,
+        updated_at: new Date().toISOString(),
+    }));
+}
+
+function serializeRuntimeRow() {
+    return {
+        id: SUPABASE_WORKSPACE_ID,
+        draft_tournament: cloneState(state.tournament),
+        draft_import_meta: normalizeImportMeta(state.importMeta),
+        draft_teams: normalizeTeams(state.teams),
+        draft_matches: normalizeMatches(state.matches),
+        draft_announcements: normalizeAnnouncements(state.announcements),
+        ui_state: serializeUiState(),
+        last_saved_at: String(state?.meta?.lastSavedAt || ""),
+        updated_at: new Date().toISOString(),
+    };
+}
+
+function buildStateFromSupabaseRows(runtimeRow, tournamentRows, playerRows, matchRows, announcementRows) {
+    const playersByTournament = new Map();
+    const matchesByTournament = new Map();
+    const announcementsByTournament = new Map();
+
+    playerRows.forEach((row) => {
+        const list = playersByTournament.get(row.tournament_id) || [];
+        list.push({
+            id: row.id || createId(),
+            name: row.name || "",
+            contact: row.contact || "",
+            registrationNumber: row.registration_number || "",
+            aadhar: row.aadhar || "",
+            organization: row.organization || "",
+            category: row.category || "",
+            source: row.source || "",
+        });
+        playersByTournament.set(row.tournament_id, list);
+    });
+
+    matchRows.forEach((row) => {
+        const list = matchesByTournament.get(row.tournament_id) || [];
+        list.push({
+            ...(row.payload || {}),
+            id: row.id || row.payload?.id || createId(),
+            teamA: row.team_a || row.payload?.teamA || "",
+            teamB: row.team_b || row.payload?.teamB || "",
+        });
+        matchesByTournament.set(row.tournament_id, list);
+    });
+
+    announcementRows.forEach((row) => {
+        const list = announcementsByTournament.get(row.tournament_id) || [];
+        list.push({
+            ...(row.payload || {}),
+            id: row.id || row.payload?.id || createId(),
+            message: row.message || row.payload?.message || "",
+        });
+        announcementsByTournament.set(row.tournament_id, list);
+    });
+
+    const assembled = normalizeLoadedState({
+        tournament: runtimeRow?.draft_tournament || defaultState.tournament,
+        tournaments: tournamentRows.map((row) => ({
+            id: row.id,
+            name: row.name || "",
+            format: row.format || "League",
+            matchRule: row.match_rule || "single_25",
+            category: row.category || "",
+            notes: row.notes || "",
+            playerCount: Number(row.player_count || 0),
+            teams: playersByTournament.get(row.id) || [],
+            importMeta: row.import_meta || {},
+            matches: matchesByTournament.get(row.id) || [],
+            announcements: announcementsByTournament.get(row.id) || [],
+            bracket: row.bracket || null,
+        })),
+        importMeta: runtimeRow?.draft_import_meta || defaultState.importMeta,
+        teams: runtimeRow?.draft_teams || [],
+        matches: runtimeRow?.draft_matches || [],
+        announcements: runtimeRow?.draft_announcements || [],
+        meta: {
+            lastSavedAt: runtimeRow?.last_saved_at || "",
+        },
+    });
+
+    return assembled;
+}
+
+async function insertRowsInChunks(client, tableName, rows, chunkSize = 500) {
+    for (let index = 0; index < rows.length; index += chunkSize) {
+        const chunk = rows.slice(index, index + chunkSize);
+        const { error } = await client.from(tableName).insert(chunk);
+        if (error) {
+            throw error;
+        }
+    }
+}
+
+async function fetchSplitStateFromSupabase(client) {
+    const [
+        runtimeResponse,
+        tournamentsResponse,
+        playersResponse,
+        matchesResponse,
+        announcementsResponse,
+    ] = await Promise.all([
+        client
+            .from(SUPABASE_RUNTIME_TABLE)
+            .select("*")
+            .eq("id", SUPABASE_WORKSPACE_ID)
+            .maybeSingle(),
+        client
+            .from(SUPABASE_TOURNAMENTS_TABLE)
+            .select("*")
+            .eq("workspace_id", SUPABASE_WORKSPACE_ID)
+            .order("sort_order", { ascending: true }),
+        client
+            .from(SUPABASE_TOURNAMENT_PLAYERS_TABLE)
+            .select("*")
+            .eq("workspace_id", SUPABASE_WORKSPACE_ID)
+            .order("sort_order", { ascending: true }),
+        client
+            .from(SUPABASE_TOURNAMENT_MATCHES_TABLE)
+            .select("*")
+            .eq("workspace_id", SUPABASE_WORKSPACE_ID)
+            .order("sort_order", { ascending: true }),
+        client
+            .from(SUPABASE_TOURNAMENT_ANNOUNCEMENTS_TABLE)
+            .select("*")
+            .eq("workspace_id", SUPABASE_WORKSPACE_ID)
+            .order("sort_order", { ascending: true }),
+    ]);
+
+    const errors = [
+        runtimeResponse.error,
+        tournamentsResponse.error,
+        playersResponse.error,
+        matchesResponse.error,
+        announcementsResponse.error,
+    ].filter(Boolean);
+
+    if (errors.length > 0) {
+        throw errors[0];
+    }
+
+    const runtimeRow = runtimeResponse.data || null;
+    const tournamentRows = Array.isArray(tournamentsResponse.data) ? tournamentsResponse.data : [];
+    const playerRows = Array.isArray(playersResponse.data) ? playersResponse.data : [];
+    const matchRows = Array.isArray(matchesResponse.data) ? matchesResponse.data : [];
+    const announcementRows = Array.isArray(announcementsResponse.data) ? announcementsResponse.data : [];
+    const hasSplitData = Boolean(
+        runtimeRow
+        || tournamentRows.length
+        || playerRows.length
+        || matchRows.length
+        || announcementRows.length
+    );
+
+    return {
+        hasSplitData,
+        runtimeRow,
+        tournamentRows,
+        playerRows,
+        matchRows,
+        announcementRows,
+    };
+}
+
+async function fetchLegacyRemoteState(client) {
+    const { data, error } = await client
+        .from(SUPABASE_STATE_TABLE)
+        .select("payload, updated_at")
+        .eq("id", SUPABASE_STATE_ROW_ID)
+        .maybeSingle();
+    if (error) {
+        throw error;
+    }
+    return data?.payload ? normalizeLoadedState(data.payload) : null;
+}
+
+function legacyTimestampHasData(value) {
+    return Boolean(
+        value
+        && (
+            Array.isArray(value.tournaments) && value.tournaments.length > 0
+            || Array.isArray(value.teams) && value.teams.length > 0
+            || Array.isArray(value.announcements) && value.announcements.length > 0
+        )
+    );
+}
+
+async function initializeRemotePersistence() {
+    const client = initializeSupabaseClient();
+    if (!client) {
+        return;
+    }
+    try {
+        const legacyState = loadLegacyLocalState();
+        const splitState = await fetchSplitStateFromSupabase(client);
+        if (splitState.hasSplitData) {
+            state = buildStateFromSupabaseRows(
+                splitState.runtimeRow,
+                splitState.tournamentRows,
+                splitState.playerRows,
+                splitState.matchRows,
+                splitState.announcementRows
+            );
+            applyUiState(splitState.runtimeRow?.ui_state || {});
+            renderAll();
+            clearLegacyLocalState();
+            remoteStateReady = true;
+            return;
+        }
+
+        const localTimestamp = getStateTimestamp(legacyState);
+        const legacyRemoteState = await fetchLegacyRemoteState(client);
+        const remoteTimestamp = getStateTimestamp(legacyRemoteState);
+
+        if (legacyRemoteState && remoteTimestamp >= localTimestamp) {
+            state = legacyRemoteState;
+            applyUiState({});
+            renderAll();
+            clearLegacyLocalState();
+            remoteStateReady = true;
+            scheduleRemotePersist(true);
+            return;
+        }
+
+        if (legacyTimestampHasData(legacyState)) {
+            state = legacyState;
+            applyUiState({});
+            renderAll();
+            scheduleRemotePersist(true);
+        }
+
+        remoteStateReady = true;
+        scheduleRemotePersist(true);
+    } catch (error) {
+        console.warn("Supabase is unavailable, so the app cannot load or save remote tournament data right now.", error);
+    }
+}
+
+function scheduleRemotePersist(force = false) {
+    if (!initializeSupabaseClient()) {
+        return;
+    }
+    if (!force && !remoteStateReady) {
+        return;
+    }
+    if (remoteSyncTimer) {
+        clearTimeout(remoteSyncTimer);
+    }
+    remoteSyncTimer = window.setTimeout(() => {
+        remoteSyncTimer = null;
+        remoteSyncInFlight = pushStateToSupabase();
+    }, force ? 0 : 350);
+}
+
+async function pushStateToSupabase() {
+    const client = initializeSupabaseClient();
+    if (!client) {
+        return;
+    }
+    try {
+        const tournaments = Array.isArray(state.tournaments) ? state.tournaments : [];
+        const tournamentRows = tournaments.map(serializeTournamentRow);
+        const playerRows = tournaments.flatMap((tournament) => serializeTournamentPlayerRows(tournament));
+        const matchRows = tournaments.flatMap((tournament) => serializeTournamentMatchRows(tournament));
+        const announcementRows = tournaments.flatMap((tournament) => serializeTournamentAnnouncementRows(tournament));
+        const runtimeRow = serializeRuntimeRow();
+
+        const runtimeResult = await client
+            .from(SUPABASE_RUNTIME_TABLE)
+            .upsert(runtimeRow, { onConflict: "id" });
+        if (runtimeResult.error) {
+            throw runtimeResult.error;
+        }
+
+        const announcementDelete = await client
+            .from(SUPABASE_TOURNAMENT_ANNOUNCEMENTS_TABLE)
+            .delete()
+            .eq("workspace_id", SUPABASE_WORKSPACE_ID);
+        if (announcementDelete.error) {
+            throw announcementDelete.error;
+        }
+
+        const matchDelete = await client
+            .from(SUPABASE_TOURNAMENT_MATCHES_TABLE)
+            .delete()
+            .eq("workspace_id", SUPABASE_WORKSPACE_ID);
+        if (matchDelete.error) {
+            throw matchDelete.error;
+        }
+
+        const playerDelete = await client
+            .from(SUPABASE_TOURNAMENT_PLAYERS_TABLE)
+            .delete()
+            .eq("workspace_id", SUPABASE_WORKSPACE_ID);
+        if (playerDelete.error) {
+            throw playerDelete.error;
+        }
+
+        const tournamentDelete = await client
+            .from(SUPABASE_TOURNAMENTS_TABLE)
+            .delete()
+            .eq("workspace_id", SUPABASE_WORKSPACE_ID);
+        if (tournamentDelete.error) {
+            throw tournamentDelete.error;
+        }
+
+        if (tournamentRows.length > 0) {
+            await insertRowsInChunks(client, SUPABASE_TOURNAMENTS_TABLE, tournamentRows);
+        }
+        if (playerRows.length > 0) {
+            await insertRowsInChunks(client, SUPABASE_TOURNAMENT_PLAYERS_TABLE, playerRows);
+        }
+        if (matchRows.length > 0) {
+            await insertRowsInChunks(client, SUPABASE_TOURNAMENT_MATCHES_TABLE, matchRows);
+        }
+        if (announcementRows.length > 0) {
+            await insertRowsInChunks(client, SUPABASE_TOURNAMENT_ANNOUNCEMENTS_TABLE, announcementRows);
+        }
+
+        remoteStateReady = true;
+        clearLegacyLocalState();
+    } catch (error) {
+        console.warn("Supabase sync failed, so the latest changes could not be stored remotely.", error);
+    }
 }
 
 function cloneState(value) {
@@ -5468,7 +6082,7 @@ function renderOverviewFixed() {
     elements.overviewTournamentList.innerHTML = "";
 
     if (!Array.isArray(state.tournaments) || state.tournaments.length === 0) {
-        elements.overviewTournamentList.innerHTML = '<tr><td colspan="6">No tournaments saved yet.</td></tr>';
+        elements.overviewTournamentList.innerHTML = '<tr><td colspan="7">No tournaments saved yet.</td></tr>';
         return;
     }
 
@@ -5487,6 +6101,7 @@ function renderOverviewFixed() {
                     <td>${escapeHtml(item.format || "-")}</td>
                     <td>${tournamentTotalPlayers}</td>
                     <td>${escapeHtml(getTournamentProgressStatus(item))}</td>
+                    <td><button class="button secondary" type="button" data-overview-delete="${escapeHtml(item.id)}">Delete</button></td>
                 </tr>
             `;
             }
