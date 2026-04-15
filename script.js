@@ -488,6 +488,7 @@ let remoteStateReady = false;
 let currentSession = null;
 let currentUserRole = "";
 let activeSection = "overview";
+let progressReminderIntervalId = null;
 let bracketEditMode = false;
 let bracketDirty = false;
 let bracketDraft = null;
@@ -605,6 +606,7 @@ const elements = {
 bindEvents();
 renderAll();
 initializeAuth();
+startProgressReminderRefresh();
 
 function bindEvents() {
     if (elements.sidebarToggleButton) {
@@ -1173,6 +1175,18 @@ function renderAll() {
     renderEditTournamentOptions();
     renderTournamentMode();
     refreshBracketPopup();
+}
+
+function startProgressReminderRefresh() {
+    if (progressReminderIntervalId) {
+        window.clearInterval(progressReminderIntervalId);
+    }
+    progressReminderIntervalId = window.setInterval(() => {
+        if (activeSection !== "progress" || !currentSession?.user) {
+            return;
+        }
+        renderBracketProgress();
+    }, 60000);
 }
 
 function setAuthStatus(message) {
@@ -2903,6 +2917,228 @@ function getCategoryMatchPrefix(category) {
     return words.map((word) => word[0].toUpperCase()).join("");
 }
 
+let scoreSheetTemplateCache = null;
+
+async function loadScoreSheetTemplate() {
+    if (scoreSheetTemplateCache) {
+        return scoreSheetTemplateCache;
+    }
+    try {
+        const response = await fetch("template/scoresheet-8boards.json", { cache: "no-store" });
+        if (!response.ok) {
+            return null;
+        }
+        const data = await response.json();
+        scoreSheetTemplateCache = data;
+        return data;
+    } catch {
+        return null;
+    }
+}
+
+function buildScoreSheetTableHtml(template, overrides) {
+    const rows = Number(template.rows || 0);
+    const cols = Number(template.cols || 0);
+    const colWidths = template.colWidths || {};
+    const rowHeights = template.rowHeights || {};
+    const merges = Array.isArray(template.merges) ? template.merges.slice() : [];
+    if (!merges.includes("A5:K5")) {
+        merges.push("A5:K5");
+    }
+    if (!merges.includes("A9:K9")) {
+        merges.push("A9:K9");
+    }
+    const values = { ...(template.cells?.values || {}), ...(overrides || {}) };
+    const borders = template.cells?.borders || {};
+    const overridesKeys = new Set(Object.keys(overrides || {}));
+
+    const mergeMap = new Map();
+    const skipCells = new Set();
+    const mergeOwner = new Map();
+    const mergeRanges = new Map();
+
+    merges.forEach((range) => {
+        const match = range.match(/^([A-Z]+)(\d+):([A-Z]+)(\d+)$/);
+        if (!match) {
+            return;
+        }
+        const [, startCol, startRow, endCol, endRow] = match;
+        const startColIndex = columnLetterToIndex(startCol);
+        const endColIndex = columnLetterToIndex(endCol);
+        const startRowIndex = Number(startRow);
+        const endRowIndex = Number(endRow);
+
+        for (let row = startRowIndex; row <= endRowIndex; row += 1) {
+            for (let col = startColIndex; col <= endColIndex; col += 1) {
+                const cellRef = `${columnIndexToLetter(col)}${row}`;
+                if (row === startRowIndex && col === startColIndex) {
+                    mergeMap.set(cellRef, {
+                        colspan: endColIndex - startColIndex + 1,
+                        rowspan: endRowIndex - startRowIndex + 1,
+                    });
+                    mergeRanges.set(cellRef, {
+                        startRow: startRowIndex,
+                        endRow: endRowIndex,
+                        startCol: startColIndex,
+                        endCol: endColIndex,
+                    });
+                } else {
+                    skipCells.add(cellRef);
+                }
+                mergeOwner.set(cellRef, `${columnIndexToLetter(startColIndex)}${startRowIndex}`);
+            }
+        }
+    });
+
+    overridesKeys.forEach((cellRef) => {
+        if (!skipCells.has(cellRef)) {
+            return;
+        }
+        const owner = mergeOwner.get(cellRef);
+        if (owner && mergeMap.has(owner)) {
+            const range = mergeRanges.get(owner);
+            mergeMap.delete(owner);
+            if (range) {
+                for (let row = range.startRow; row <= range.endRow; row += 1) {
+                    for (let col = range.startCol; col <= range.endCol; col += 1) {
+                        const ref = `${columnIndexToLetter(col)}${row}`;
+                        skipCells.delete(ref);
+                    }
+                }
+            }
+        } else {
+            skipCells.delete(cellRef);
+        }
+    });
+
+    const colgroup = [];
+    for (let col = 1; col <= cols; col += 1) {
+        const width = colWidths[String(col)];
+        const widthPx = width ? Math.round(Number(width) * 7 + 5) : null;
+        colgroup.push(`<col${widthPx ? ` style="width:${widthPx}px"` : ""}>`);
+    }
+
+    const bodyRows = [];
+    for (let row = 1; row <= rows; row += 1) {
+        const heightPt = rowHeights[String(row)];
+        const heightPx = heightPt ? Math.round(Number(heightPt) * 1.333) : null;
+        const rowCells = [];
+        for (let col = 1; col <= cols; col += 1) {
+            const cellRef = `${columnIndexToLetter(col)}${row}`;
+            if (skipCells.has(cellRef)) {
+                continue;
+            }
+            const merge = mergeMap.get(cellRef);
+            const value = values[cellRef] || "";
+            const renderedValue = formatScoreSheetCellValue(value);
+            const borderFlags = borders[cellRef] || "";
+            const borderStyle = buildScoreSheetBorderStyle(borderFlags, "#111");
+            const styleParts = [];
+            if (borderStyle) {
+                styleParts.push(borderStyle);
+            }
+            const style = ` style="${styleParts.join("; ")}"`;
+            const spanAttrs = merge ? ` colspan="${merge.colspan}" rowspan="${merge.rowspan}"` : "";
+            const classNames = [];
+            if (col === 1 && ["1", "2", "3"].includes(String(value)) && row >= 13 && row <= 15) {
+                classNames.push("center-cell");
+            }
+            if (col === 2 && ["1", "2", "3", "4", "5", "6", "7", "8"].includes(String(value)) && row >= 18) {
+                classNames.push("center-cell");
+            }
+            const classAttr = classNames.length ? ` class="${classNames.join(" ")}"` : "";
+            rowCells.push(`<td${spanAttrs}${classAttr}${style}>${renderedValue}</td>`);
+        }
+        bodyRows.push(`<tr data-row="${row}"${heightPx ? ` style="height:${heightPx}px"` : ""}>${rowCells.join("")}</tr>`);
+    }
+
+    return `
+        <table class="score-sheet-table">
+            <colgroup>
+                ${colgroup.join("")}
+            </colgroup>
+            <tbody>
+                ${bodyRows.join("")}
+            </tbody>
+        </table>
+    `;
+}
+
+const SCORE_SHEET_VALUE_START = "[[FV]]";
+const SCORE_SHEET_VALUE_END = "[[/FV]]";
+
+function formatScoreSheetCellValue(value) {
+    const escaped = escapeHtml(String(value || ""));
+    return escaped
+        .replace(new RegExp(escapeRegExp(SCORE_SHEET_VALUE_START), "g"), '<span class="field-value">')
+        .replace(new RegExp(escapeRegExp(SCORE_SHEET_VALUE_END), "g"), "</span>");
+}
+
+function applyScoreSheetDottedValue(text, replacements, options = {}) {
+    if (!text || !Array.isArray(replacements) || replacements.length === 0) {
+        return text;
+    }
+    let output = String(text);
+    const prefix = options.prefix || " ";
+    const suffix = options.suffix || "";
+    replacements.forEach((value) => {
+        if (!value) {
+            return;
+        }
+        const insert = `${prefix}${SCORE_SHEET_VALUE_START}${value}${SCORE_SHEET_VALUE_END}${suffix}`;
+        const next = output.replace(/\.{3,}/, insert);
+        if (next !== output) {
+            output = next;
+        }
+    });
+    return output;
+}
+
+function buildScoreSheetOverrides(template, data) {
+    const values = { ...(template?.cells?.values || {}) };
+    values.A5 = applyScoreSheetDottedValue(values.A5, [
+        data.category || "",
+        data.round || "",
+        data.date || "",
+        data.time || "",
+    ], { prefix: ":   ", suffix: "       " });
+    values.A7 = applyScoreSheetDottedValue(values.A7, [data.matchCode || ""], { prefix: ": " });
+    values.D12 = applyScoreSheetDottedValue(values.D12, [data.playerA || ""], { prefix: ": " });
+    values.H12 = applyScoreSheetDottedValue(values.H12, [data.playerB || ""], { prefix: ": " });
+    values.D14 = applyScoreSheetDottedValue(values.D14, [data.orgA || ""], { prefix: ": " });
+    values.H14 = applyScoreSheetDottedValue(values.H14, [data.orgB || ""], { prefix: ": " });
+    if (values.D13) {
+        values.D13 = "";
+    }
+    if (values.H13) {
+        values.H13 = "";
+    }
+    return values;
+}
+
+function columnLetterToIndex(letter) {
+    let index = 0;
+    for (let i = 0; i < letter.length; i += 1) {
+        index = index * 26 + (letter.charCodeAt(i) - 64);
+    }
+    return index;
+}
+
+function columnIndexToLetter(index) {
+    let result = "";
+    let current = index;
+    while (current > 0) {
+        const mod = (current - 1) % 26;
+        result = String.fromCharCode(65 + mod) + result;
+        current = Math.floor((current - mod) / 26);
+    }
+    return result;
+}
+
+function escapeRegExp(text) {
+    return String(text).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
 function buildPlayerOrganizationMap(tournament) {
     const map = new Map();
     const players = getBracketPlayers(tournament);
@@ -3731,12 +3967,13 @@ function renderBracketProgress() {
             const winnerLabel = getBracketMatchWinnerLabel(match);
             const completed = isBracketMatchCompleted(match, matchRule);
             const locked = isBracketMatchLocked(match, matchRule);
+            const reminder = getScoreSheetReminderState(tournament, match);
             const scoreCells = renderProgressScoreCells(matchRule, match, roundIndex, matchIndex, canScore);
             const resultSummary = isByeMatch && match.winnerSide
                 ? "BYE"
                 : (getBracketMatchResultSummary(match, matchRule) || "-");
             rows.push(`
-                <tr class="${completed ? "progress-completed-row" : ""} ${completed && !locked ? "progress-editing-row" : ""} ${isByeMatch ? "progress-bye-row" : ""}">
+                <tr class="${completed ? "progress-completed-row" : ""} ${completed && !locked ? "progress-editing-row" : ""} ${isByeMatch ? "progress-bye-row" : ""} ${reminder ? `progress-reminder-row-${reminder.tone}` : ""}">
                     <td>${escapeHtml(match.label || "-")}</td>
                     <td>${escapeHtml(formatProgressPlayerLabel(match.slotA, match.seedA))}</td>
                     ${scoreCells}
@@ -3744,6 +3981,7 @@ function renderBracketProgress() {
                     <td>${escapeHtml(formatProgressPlayerLabel(winnerLabel, match.winnerSide === "A" ? match.seedA : match.winnerSide === "B" ? match.seedB : "" ) || "-")}</td>
                     <td>${escapeHtml(resultSummary)}</td>
                     <td class="progress-action-cell">
+                        ${buildScoreSheetReminderMarkup(reminder)}
                         ${isByeMatch || completed ? "" : `<button class="button ghost" type="button" data-progress-sheet="${roundIndex}:${matchIndex}">Prep Score Sheet</button>`}
                         ${completed && locked
                             ? `<button class="button ghost" type="button" data-progress-unlock="${roundIndex}:${matchIndex}">Unlock</button>`
@@ -3854,11 +4092,12 @@ function renderProgressScoreCells(matchRule, match, roundIndex, matchIndex, canS
     `;
 }
 
-function openProgressScoreSheet(key) {
+async function openProgressScoreSheet(key) {
     const [roundIndexText, matchIndexText] = String(key || "").split(":");
     const roundIndex = Number(roundIndexText);
     const matchIndex = Number(matchIndexText);
-    const tournament = state.tournaments.find((item) => item.id === progressTournamentId);
+    const tournamentIndex = state.tournaments.findIndex((item) => item.id === progressTournamentId);
+    const tournament = tournamentIndex === -1 ? null : state.tournaments[tournamentIndex];
     const bracket = tournament?.bracket;
     if (!tournament || !bracket) {
         return;
@@ -3867,19 +4106,52 @@ function openProgressScoreSheet(key) {
     if (!match) {
         return;
     }
-    const matchRule = tournament.matchRule || "single_25";
+    const preparedAt = new Date().toISOString();
+    state.tournaments[tournamentIndex].bracket.rounds[roundIndex].matches[matchIndex].scoreSheetPreparedAt = preparedAt;
+    persistWithMode("progress", { tournamentId: progressTournamentId });
+    renderAll();
+    const isOpenSingles = /open\s*singles/i.test(String(tournament.category || ""));
+    if (!isOpenSingles) {
+        setProgressStatus("Prep Score Sheet is only available for Open Singles.");
+        return;
+    }
     const title = `${tournament.name} - ${tournament.category} - ${match.label || "Match"}`;
     const sheetWindow = window.open("", "bracket-score-sheet", "width=900,height=700,resizable=yes,scrollbars=yes");
     if (!sheetWindow) {
         setProgressStatus("The score sheet window was blocked. Please allow pop-ups for this page.");
         return;
     }
-    const playerA = formatProgressPlayerLabel(match.slotA, match.seedA);
-    const playerB = formatProgressPlayerLabel(match.slotB, match.seedB);
-    const isBestOf3 = matchRule === "best_of_3_25";
-    const scoreRows = isBestOf3
-        ? [1, 2, 3]
-        : [1];
+    const parsedA = parseBracketPlayerLabel(match.slotA || "");
+    const parsedB = parseBracketPlayerLabel(match.slotB || "");
+    const playerA = formatProgressPlayerLabel(parsedA.name || "", match.seedA);
+    const playerB = formatProgressPlayerLabel(parsedB.name || "", match.seedB);
+    const orgA = parsedA.organization || "";
+    const orgB = parsedB.organization || "";
+    const prefix = getCategoryMatchPrefix(tournament.category);
+    const matchNumber = getMatchNumberFromLabel(match.label || "");
+    const matchCode = matchNumber ? `${prefix}${matchNumber}` : "";
+    const roundLabel = getBracketRoundLabel(roundIndex, bracket.rounds.length);
+    const now = new Date();
+    const dateText = `${String(now.getDate()).padStart(2, "0")}/${String(now.getMonth() + 1).padStart(2, "0")}/${now.getFullYear()}`;
+    const timeText = `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
+    const template = await loadScoreSheetTemplate();
+    if (!template) {
+        setProgressStatus("Scoresheet template could not be loaded.");
+        return;
+    }
+
+    const overrides = buildScoreSheetOverrides(template, {
+        category: tournament.category || "",
+        round: roundLabel,
+        date: dateText,
+        time: timeText,
+        matchCode,
+        playerA,
+        playerB,
+        orgA,
+        orgB,
+    });
+    const tableHtml = buildScoreSheetTableHtml(template, overrides);
     sheetWindow.document.open();
     sheetWindow.document.write(`
         <!doctype html>
@@ -3889,52 +4161,50 @@ function openProgressScoreSheet(key) {
             <title>${escapeHtml(title)} - Score Sheet</title>
             <style>
                 :root { color-scheme: light; }
-                body { margin: 0; font-family: "Segoe UI", Arial, sans-serif; padding: 24px; background: #f6f7fb; color: #111827; }
-                .card { background: #ffffff; border: 1px solid #d9dde7; border-radius: 16px; padding: 20px; max-width: 820px; margin: 0 auto; }
-                h1 { font-size: 20px; margin: 0 0 6px; }
-                .meta { color: #4b5563; font-size: 13px; margin-bottom: 16px; }
-                .players { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 18px; }
-                .player-box { border: 1px solid #e1e5ee; border-radius: 12px; padding: 12px 14px; }
-                .player-box strong { display: block; margin-bottom: 6px; font-size: 14px; }
-                table { width: 100%; border-collapse: collapse; margin-bottom: 18px; }
-                th, td { border: 1px solid #e1e5ee; padding: 10px; text-align: center; font-size: 13px; }
-                th { background: #f3f4f6; text-transform: uppercase; letter-spacing: 0.04em; font-size: 12px; }
-                .notes { border: 1px dashed #cbd5e1; border-radius: 12px; padding: 12px; min-height: 80px; }
-                .footer { margin-top: 16px; color: #6b7280; font-size: 12px; }
-                @media print {
-                    body { background: #ffffff; padding: 0; }
-                    .card { border: 0; border-radius: 0; }
+                body { margin: 0; font-family: "Segoe UI", Arial, sans-serif; padding: 0; background: #ffffff; color: #111827; overflow: auto; text-align: left; }
+                .sheet { width: max-content; margin: 0; padding: 0; }
+                table { border-collapse: collapse; table-layout: fixed; min-width: max-content; border-spacing: 0; empty-cells: show; position: relative; z-index: 1; }
+                .score-sheet-table { margin: 0; }
+                td { padding: 0; font-size: 12px; font-weight: 600; vertical-align: middle; white-space: pre-wrap; }
+                .score-sheet-table td { text-align: center; }
+                .field-value { font-style: italic; font-weight: 600; }
+                .center-cell { text-align: center; }
+                tr[data-row="1"] td { text-align: center; font-size: 18px; font-weight: 700; }
+                tr[data-row="2"] td { text-align: center; font-size: 16px; font-weight: 600; }
+                tr[data-row="3"] td { text-align: center; font-size: 14px; font-weight: 600; }
+                tr[data-row="5"] td,
+                tr[data-row="7"] td,
+                tr[data-row="9"] td,
+                tr[data-row="12"] td,
+                tr[data-row="14"] td {
+                    letter-spacing: 0.2px;
                 }
+                tr[data-row="5"] td,
+                tr[data-row="9"] td {
+                    white-space: nowrap;
+                }
+                tr[data-row="12"] td,
+                tr[data-row="14"] td {
+                    white-space: nowrap;
+                }
+                @media print {
+                    html, body { margin: 0 !important; padding: 0 !important; }
+                    body { -webkit-print-color-adjust: exact; -moz-print-color-adjust: exact; print-color-adjust: exact; }
+                    table { border-collapse: collapse; border-spacing: 0; empty-cells: show; }
+                    td { -webkit-print-color-adjust: exact; -moz-print-color-adjust: exact; print-color-adjust: exact; }
+                }
+                @media print and (min-resolution: 0.001dpcm) {
+                    @supports (-webkit-appearance: none) {
+                        .sheet { padding: 0; }
+                        table { transform: scale(0.985); transform-origin: top center; }
+                    }
+                }
+                @page { size: auto; margin: 0mm; }
             </style>
         </head>
         <body>
-            <div class="card">
-                <h1>${escapeHtml(title)}</h1>
-                <div class="meta">${escapeHtml(getBracketRoundLabel(roundIndex, bracket.rounds.length))} • ${escapeHtml(match.label || "Match")} • ${escapeHtml(getMatchRuleLabel(matchRule))}</div>
-                <div class="players">
-                    <div class="player-box"><strong>Player A</strong>${escapeHtml(playerA)}</div>
-                    <div class="player-box"><strong>Player B</strong>${escapeHtml(playerB)}</div>
-                </div>
-                <table>
-                    <thead>
-                        <tr>
-                            <th>Set</th>
-                            <th>${escapeHtml(playerA)}</th>
-                            <th>${escapeHtml(playerB)}</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        ${scoreRows.map((set) => `
-                            <tr>
-                                <td>${isBestOf3 ? `S${set}` : "S1"}</td>
-                                <td></td>
-                                <td></td>
-                            </tr>
-                        `).join("")}
-                    </tbody>
-                </table>
-                <div class="notes">Notes</div>
-                <div class="footer">Prepared from Bracket Progress</div>
+            <div class="sheet">
+                ${tableHtml}
             </div>
         </body>
         </html>
@@ -5409,6 +5679,7 @@ function normalizeBracketRounds(rounds) {
                     sourceB: match?.sourceB || "",
                     scoreA: match?.scoreA || "",
                     scoreB: match?.scoreB || "",
+                    scoreSheetPreparedAt: match?.scoreSheetPreparedAt || "",
                     games: Array.isArray(match?.games) && match.games.length === 3
                         ? match.games.map((game) => ({ a: game?.a || "", b: game?.b || "" }))
                         : [{ a: "", b: "" }, { a: "", b: "" }, { a: "", b: "" }],
@@ -5418,6 +5689,80 @@ function normalizeBracketRounds(rounds) {
                 : [],
         }))
         : [];
+}
+
+function isJuniorTournamentCategory(category) {
+    const normalizedCategory = String(category || "").trim().toLowerCase();
+    if (!normalizedCategory) {
+        return false;
+    }
+    return /(^|[^a-z])u\s*\d{1,2}([^a-z]|$)/i.test(normalizedCategory)
+        || normalizedCategory.includes("junior")
+        || /under\s*\d{1,2}/i.test(normalizedCategory);
+}
+
+function getScoreSheetReminderState(tournament, match, now = Date.now()) {
+    if (!tournament || !match || !match.scoreSheetPreparedAt) {
+        return null;
+    }
+    if (isBracketMatchCompleted(match, tournament.matchRule || "single_25")) {
+        return null;
+    }
+
+    const preparedAt = Date.parse(match.scoreSheetPreparedAt);
+    if (!Number.isFinite(preparedAt)) {
+        return null;
+    }
+
+    const elapsedMinutes = Math.max(0, Math.floor((now - preparedAt) / 60000));
+    if (isJuniorTournamentCategory(tournament.category)) {
+        if (elapsedMinutes < 25) {
+            return {
+                tone: "fresh",
+                label: `Issued ${elapsedMinutes}m ago`,
+                ageLabel: `${elapsedMinutes}m`,
+            };
+        }
+        return {
+            tone: "junior-alert",
+            label: `Junior reminder: ${elapsedMinutes}m`,
+            ageLabel: `${elapsedMinutes}m`,
+        };
+    }
+
+    if (elapsedMinutes < 40) {
+        return {
+            tone: "fresh",
+            label: `Issued ${elapsedMinutes}m ago`,
+            ageLabel: `${elapsedMinutes}m`,
+        };
+    }
+    if (elapsedMinutes < 80) {
+        return {
+            tone: "stage-1",
+            label: `Reminder: ${elapsedMinutes}m`,
+            ageLabel: `${elapsedMinutes}m`,
+        };
+    }
+    if (elapsedMinutes < 120) {
+        return {
+            tone: "stage-2",
+            label: `Reminder: ${elapsedMinutes}m`,
+            ageLabel: `${elapsedMinutes}m`,
+        };
+    }
+    return {
+        tone: "stage-3",
+        label: `Reminder: ${elapsedMinutes}m`,
+        ageLabel: `${elapsedMinutes}m`,
+    };
+}
+
+function buildScoreSheetReminderMarkup(reminder) {
+    if (!reminder) {
+        return '<span class="progress-reminder progress-reminder-none">-</span>';
+    }
+    return `<span class="progress-reminder progress-reminder-${escapeHtml(reminder.tone)}" title="${escapeHtml(reminder.label)}">${escapeHtml(reminder.ageLabel)}</span>`;
 }
 
 function parseCsv(text) {
