@@ -3718,11 +3718,14 @@ function renderBracketProgress() {
             if (!match) {
                 return;
             }
+            const slotAText = String(match.slotA || "").trim();
+            const slotBText = String(match.slotB || "").trim();
+            const slotAIsBye = /^BYE$/i.test(slotAText);
+            const slotBIsBye = /^BYE$/i.test(slotBText);
             const isByeMatch = Boolean(
-                match.byeA
-                || match.byeB
-                || /^BYE$/i.test(String(match.slotA || "").trim())
-                || /^BYE$/i.test(String(match.slotB || "").trim())
+                slotAIsBye
+                || slotBIsBye
+                || (!match.isPlayable && (slotAIsBye || slotBIsBye))
             );
             const canScore = match.isPlayable && isBracketMatchReady(match);
             const winnerLabel = getBracketMatchWinnerLabel(match);
