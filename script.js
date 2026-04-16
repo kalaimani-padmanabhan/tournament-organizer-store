@@ -6052,6 +6052,30 @@ function exportPlayersCsv(players, fileName) {
     URL.revokeObjectURL(url);
 }
 
+function exportBallotCsv(players, fileName) {
+    const headers = ["S.No", "Organization", "Player", "Registration No.", "Aadhar", "Contact"];
+    const rows = players.map((team, index) => [
+        String(index + 1),
+        getDisplayOrganization(team.organization || ""),
+        team.name || "",
+        team.registrationNumber || "",
+        team.aadhar || "",
+        team.contact || "",
+    ]);
+
+    const csv = [headers, ...rows]
+        .map((row) => row.map(csvEscape).join(","))
+        .join("\r\n");
+
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = fileName;
+    link.click();
+    URL.revokeObjectURL(url);
+}
+
 function exportSkippedCsv(entries, fileName) {
     const headers = ["S.No", "Player", "Registration No.", "Aadhar", "Organization", "Category", "Reason"];
     const rows = entries.map((entry, index) => [
