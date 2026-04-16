@@ -1972,8 +1972,17 @@ function buildSingleEliminationBracketData(players, startSequence = 1) {
             organization: player.organization,
             category: player.category,
             contact: player.contact,
-            seed: index + 1,
+            seed: "",
         };
+    });
+
+    let sequentialSlotNumber = 1;
+    seededSlots.forEach((player) => {
+        if (!player) {
+            return;
+        }
+        player.seed = sequentialSlotNumber;
+        sequentialSlotNumber += 1;
     });
 
     const rounds = [];
@@ -4008,7 +4017,7 @@ function renderBracketProgress() {
     }
 
     const tournament = state.tournaments.find((item) => item.id === progressTournamentId);
-    const bracket = tournament?.bracket;
+    let bracket = tournament?.bracket;
     if (!tournament) {
         elements.progressTableBody.innerHTML = '<tr><td colspan="8">Choose a saved tournament to enter results.</td></tr>';
         if (elements.progressMatchRuleDisplay) {
@@ -4026,6 +4035,9 @@ function renderBracketProgress() {
         setProgressStatus("Generate a single-elimination bracket first.");
         return;
     }
+
+    const preview = ensureByeAdvancements(tournament, bracket);
+    bracket = preview.bracket || bracket;
 
     const tournamentIndex = state.tournaments.findIndex((item) => item.id === progressTournamentId);
     const autoAdvancedBracket = cloneState(bracket);
@@ -4577,12 +4589,56 @@ function syncByeAdvancementSlots(bracket) {
     }
 }
 
+function applySequentialBracketDisplaySeeds(bracket) {
+    if (!bracket || String(bracket.type || "single") !== "single") {
+        return false;
+    }
+
+    const firstRoundMatches = bracket.rounds?.[0]?.matches;
+    if (!Array.isArray(firstRoundMatches) || firstRoundMatches.length === 0) {
+        return false;
+    }
+
+    let updated = false;
+    let nextDisplayNumber = 1;
+
+    const assignSeed = (match, slotField, seedField) => {
+        const label = String(match?.[slotField] || "").trim();
+        const isBye = !label || /^BYE$/i.test(label);
+        const expectedSeed = isBye ? "" : String(nextDisplayNumber);
+        const currentSeed = String(match?.[seedField] || "").trim();
+
+        if (currentSeed !== expectedSeed) {
+            match[seedField] = expectedSeed;
+            updated = true;
+        }
+
+        if (!isBye) {
+            nextDisplayNumber += 1;
+        }
+    };
+
+    firstRoundMatches.forEach((match) => {
+        assignSeed(match, "slotA", "seedA");
+        assignSeed(match, "slotB", "seedB");
+    });
+
+    if (updated) {
+        syncByeAdvancementSlots(bracket);
+        recomputeSingleEliminationProgress(bracket);
+    }
+
+    return updated;
+}
+
 function ensureByeAdvancements(tournament, bracket) {
     if (!tournament || !bracket || String(bracket.type || "single") !== "single") {
         return { bracket, updated: false };
     }
     const preview = cloneState(bracket);
-    const updated = applyByeAdvancements(preview);
+    const renumbered = applySequentialBracketDisplaySeeds(preview);
+    const byeUpdated = applyByeAdvancements(preview);
+    const updated = renumbered || byeUpdated;
     if (updated && !bracketEditMode) {
         const tournamentIndex = state.tournaments.findIndex((item) => item.id === tournament.id);
         if (tournamentIndex !== -1) {
@@ -5237,13 +5293,9 @@ function handleBracketSlotSwap(bracket, sectionKey, field, roundIndex, matchInde
     }
 
     const firstField = selectedBracketSwapSlot.field;
-    const firstByeField = firstField === "slotA" ? "byeA" : "byeB";
-    const secondByeField = field === "slotA" ? "byeA" : "byeB";
     const firstSeedField = firstField === "slotA" ? "seedA" : "seedB";
-    const secondSeedField = field === "slotA" ? "seedA" : "seedB";
 
     const firstValue = firstMatch[firstField];
-    const firstBye = Boolean(firstMatch[firstByeField]);
     const firstSeed = firstMatch[firstSeedField];
 
     if (!String(firstSeed || "").trim()) {
@@ -5255,11 +5307,7 @@ function handleBracketSlotSwap(bracket, sectionKey, field, roundIndex, matchInde
     }
 
     firstMatch[firstField] = currentMatch[field];
-    firstMatch[firstByeField] = Boolean(currentMatch[secondByeField]);
-    firstMatch[firstSeedField] = currentMatch[secondSeedField];
     currentMatch[field] = firstValue;
-    currentMatch[secondByeField] = firstBye;
-    currentMatch[secondSeedField] = firstSeed;
 
     recomputeSingleEliminationProgress(bracket);
     applyByeAdvancements(bracket);
