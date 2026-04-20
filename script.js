@@ -478,6 +478,7 @@ let state = cloneState(defaultState);
 let tournamentMode = "";
 let activeTournamentId = "";
 let ballotTournamentId = "";
+let ballotEditingPlayerId = "";
 let bracketTournamentId = "";
 let bracketZoom = 1;
 let sidebarCollapsed = false;
@@ -562,6 +563,7 @@ const elements = {
     ballotOrganizationCount: document.getElementById("ballotOrganizationCount"),
     ballotCategoryLabel: document.getElementById("ballotCategoryLabel"),
     ballotTournamentLabel: document.getElementById("ballotTournamentLabel"),
+    ballotStatus: document.getElementById("ballotStatus"),
     ballotList: document.getElementById("ballotList"),
     bracketTournamentSelect: document.getElementById("bracketTournamentSelect"),
     generateBracketButton: document.getElementById("generateBracketButton"),
@@ -801,7 +803,41 @@ function bindEvents() {
     if (elements.ballotTournamentSelect) {
         elements.ballotTournamentSelect.addEventListener("change", () => {
             ballotTournamentId = elements.ballotTournamentSelect.value || "";
+            ballotEditingPlayerId = "";
             renderBallot();
+        });
+    }
+
+    if (elements.ballotList) {
+        elements.ballotList.addEventListener("click", (event) => {
+            const editButton = event.target.closest("[data-ballot-edit]");
+            if (editButton) {
+                ballotEditingPlayerId = editButton.dataset.ballotEdit || "";
+                renderBallot();
+                setBallotStatus("Editing ballot entry.");
+                return;
+            }
+
+            const cancelButton = event.target.closest("[data-ballot-cancel]");
+            if (cancelButton) {
+                ballotEditingPlayerId = "";
+                renderBallot();
+                setBallotStatus("Ballot edit cancelled.");
+                return;
+            }
+
+            const saveButton = event.target.closest("[data-ballot-save]");
+            if (saveButton) {
+                setBallotStatus("Saving ballot record...");
+                saveBallotPlayerRecord(saveButton.dataset.ballotSave || "");
+                return;
+            }
+
+            const deleteButton = event.target.closest("[data-ballot-delete]");
+            if (deleteButton) {
+                setBallotStatus("Deleting ballot record...");
+                deleteBallotPlayerRecord(deleteButton.dataset.ballotDelete || "");
+            }
         });
     }
 
@@ -1671,8 +1707,12 @@ function importPlayersFromCsv(csvText, sourceLabel) {
     ]);
     const organizationIndex = findHeaderIndex(headers, [
         "name of the organization institution",
+        "name of the institution organization",
+        "name of the institution or organization",
+        "name of the organization or institution",
         "organization",
         "organization institution",
+        "institution organization",
         "institution",
         "club",
     ]);
@@ -1957,33 +1997,7 @@ function buildSingleEliminationBracketData(players, startSequence = 1) {
     const byes = size - players.length;
     const seedPositions = getSeedPositions(size);
     const arrangedPlayers = arrangePlayersForBracket(players, seedPositions, size);
-    const seededSlots = Array.from({ length: size }, () => null);
-
-    arrangedPlayers.forEach((player, index) => {
-        const bracketPosition = seedPositions[index];
-        if (!bracketPosition) {
-            return;
-        }
-        seededSlots[bracketPosition - 1] = {
-            id: player.id,
-            name: player.name,
-            registrationNumber: player.registrationNumber,
-            aadhar: player.aadhar,
-            organization: player.organization,
-            category: player.category,
-            contact: player.contact,
-            seed: "",
-        };
-    });
-
-    let sequentialSlotNumber = 1;
-    seededSlots.forEach((player) => {
-        if (!player) {
-            return;
-        }
-        player.seed = sequentialSlotNumber;
-        sequentialSlotNumber += 1;
-    });
+    const seededSlots = buildPreferredByeSeededSlots(arrangedPlayers, size);
 
     const rounds = [];
     let currentEntries = seededSlots.map((player) => (
@@ -2988,6 +3002,19 @@ function getCategoryMatchPrefix(category) {
     if (!text) {
         return "";
     }
+
+    const normalized = text.toLowerCase().replace(/[^a-z0-9]+/g, " ");
+    const juniorMatchers = [
+        { pattern: /\b(?:u|under)\s*12\b.*\bboys?\b|\bboys?\b.*\b(?:u|under)\s*12\b/, prefix: "U12B" },
+        { pattern: /\b(?:u|under)\s*14\b.*\bboys?\b|\bboys?\b.*\b(?:u|under)\s*14\b/, prefix: "U14B" },
+        { pattern: /\b(?:u|under)\s*12\b.*\bgirls?\b|\bgirls?\b.*\b(?:u|under)\s*12\b/, prefix: "U12G" },
+        { pattern: /\b(?:u|under)\s*14\b.*\bgirls?\b|\bgirls?\b.*\b(?:u|under)\s*14\b/, prefix: "U14G" },
+    ];
+    const juniorPrefix = juniorMatchers.find((entry) => entry.pattern.test(normalized));
+    if (juniorPrefix) {
+        return juniorPrefix.prefix;
+    }
+
     const words = text.match(/[A-Za-z]+/g) || [];
     if (words.length === 0) {
         return "";
@@ -3321,29 +3348,218 @@ function renderBallot() {
     }
 
     if (!currentTournament) {
-        elements.ballotList.innerHTML = '<tr><td colspan="6">Save a tournament first to prepare a ballot.</td></tr>';
+        elements.ballotList.innerHTML = '<tr><td colspan="7">Save a tournament first to prepare a ballot.</td></tr>';
+        setBallotStatus("Choose a saved tournament to review or edit ballot entries.");
         return;
     }
 
     if (ballotPlayers.length === 0) {
-        elements.ballotList.innerHTML = '<tr><td colspan="6">No ballot entries available for the selected tournament.</td></tr>';
+        elements.ballotList.innerHTML = '<tr><td colspan="7">No ballot entries available for the selected tournament.</td></tr>';
+        setBallotStatus("No ballot entries available for the selected tournament.");
         return;
     }
 
     elements.ballotList.innerHTML = ballotPlayers
         .map(
             (team, index) => `
-                <tr>
+                <tr data-ballot-row="${escapeHtml(team.id)}">
                     <td>${index + 1}</td>
-                    <td>${escapeHtml(getDisplayOrganization(team.organization) || "")}</td>
-                    <td>${escapeHtml(team.name || "-")}</td>
-                    <td>${escapeHtml(team.registrationNumber || "-")}</td>
-                    <td>${escapeHtml(team.aadhar || "-")}</td>
-                    <td>${escapeHtml(team.contact || "-")}</td>
+                    ${renderBallotCell(team, "organization", ballotEditingPlayerId === team.id, getDisplayOrganization(team.organization) || "")}
+                    ${renderBallotCell(team, "name", ballotEditingPlayerId === team.id, team.name || "-")}
+                    ${renderBallotCell(team, "registrationNumber", ballotEditingPlayerId === team.id, team.registrationNumber || "")}
+                    ${renderBallotCell(team, "aadhar", ballotEditingPlayerId === team.id, team.aadhar || "")}
+                    ${renderBallotCell(team, "contact", ballotEditingPlayerId === team.id, team.contact || "")}
+                    <td class="progress-action-cell">
+                        ${ballotEditingPlayerId === team.id
+                            ? `<button class="button secondary" type="button" data-ballot-save="${escapeHtml(team.id)}">Save</button>
+                               <button class="button ghost" type="button" data-ballot-cancel="${escapeHtml(team.id)}">Cancel</button>`
+                            : `<button class="button ghost" type="button" data-ballot-edit="${escapeHtml(team.id)}">Edit</button>
+                               <button class="button ghost" type="button" data-ballot-delete="${escapeHtml(team.id)}">Delete</button>`}
+                    </td>
                 </tr>
             `
         )
         .join("");
+
+    setBallotStatus(ballotEditingPlayerId ? "Update the ballot entry and click Save." : "Ballot entries are ready to review, edit, or export.");
+}
+
+function renderBallotCell(team, field, isEditing, fallbackValue) {
+    const currentValue = String(team?.[field] || "");
+    const displayValue = String(fallbackValue || currentValue || "-");
+    if (!isEditing) {
+        return `<td>${escapeHtml(displayValue)}</td>`;
+    }
+
+    const safeValue = field === "organization" ? getDisplayOrganization(currentValue) : currentValue;
+    return `
+        <td>
+            <input
+                type="text"
+                data-ballot-field="${escapeHtml(field)}"
+                value="${escapeHtml(safeValue)}"
+                placeholder="${escapeHtml(field === "name" ? "Player" : field === "organization" ? "Organization" : "")}">
+        </td>
+    `;
+}
+
+function setBallotStatus(message) {
+    if (elements.ballotStatus) {
+        elements.ballotStatus.textContent = message || "";
+    }
+}
+
+function invalidateTournamentBracketForBallotChange(tournamentIndex) {
+    if (tournamentIndex < 0 || tournamentIndex >= state.tournaments.length) {
+        return false;
+    }
+
+    const tournament = state.tournaments[tournamentIndex];
+    if (!tournament?.bracket) {
+        return false;
+    }
+
+    state.tournaments[tournamentIndex] = {
+        ...tournament,
+        bracket: null,
+    };
+
+    if (bracketTournamentId === tournament.id) {
+        bracketEditMode = false;
+        bracketDirty = false;
+        bracketDraft = null;
+        selectedBracketSwapSlot = null;
+        setBracketStatus("Ballot changes cleared the saved bracket. Generate it again to continue.");
+    }
+
+    if (progressTournamentId === tournament.id) {
+        setProgressStatus("Ballot changes cleared the saved bracket. Generate it again before updating progress.");
+    }
+
+    return true;
+}
+
+async function saveBallotPlayerRecord(playerId) {
+    const normalizedId = String(playerId || "").trim();
+    const tournamentIndex = state.tournaments.findIndex((item) => item.id === ballotTournamentId);
+    if (!normalizedId || tournamentIndex === -1) {
+        return;
+    }
+
+    const row = elements.ballotList?.querySelector(`[data-ballot-row="${normalizedId}"]`);
+    if (!row) {
+        return;
+    }
+
+    const tournament = state.tournaments[tournamentIndex];
+    const playerIndex = normalizeTeams(tournament.teams).findIndex((team) => team.id === normalizedId);
+    if (playerIndex === -1) {
+        return;
+    }
+
+    const getFieldValue = (field) => String(row.querySelector(`[data-ballot-field="${field}"]`)?.value || "").trim();
+    const name = getFieldValue("name").toUpperCase();
+    const registrationNumber = getFieldValue("registrationNumber");
+    const aadhar = getFieldValue("aadhar");
+    const organization = getFieldValue("organization");
+    const contact = getFieldValue("contact");
+
+    if (!name) {
+        setBallotStatus("Player name is required.");
+        return;
+    }
+
+    const identityKey = buildPlayerIdentityKey({
+        registrationNumber,
+        aadhar,
+        organization,
+        category: tournament.category,
+    });
+    if (!identityKey) {
+        setBallotStatus("Ballot edit needs registration number or Aadhar, plus organization.");
+        return;
+    }
+
+    const hasDuplicate = normalizeTeams(tournament.teams).some((team) => {
+        if (team.id === normalizedId) {
+            return false;
+        }
+        return buildPlayerIdentityKey({
+            registrationNumber: team.registrationNumber,
+            aadhar: team.aadhar,
+            organization: team.organization,
+            category: tournament.category,
+        }) === identityKey;
+    });
+    if (hasDuplicate) {
+        setBallotStatus("That ballot record would duplicate another player in this tournament.");
+        return;
+    }
+
+    const updatedTeam = {
+        ...tournament.teams[playerIndex],
+        name,
+        registrationNumber,
+        aadhar,
+        organization,
+        contact,
+    };
+    state.tournaments[tournamentIndex].teams[playerIndex] = updatedTeam;
+    state.tournaments[tournamentIndex].playerCount = state.tournaments[tournamentIndex].teams.length;
+    const bracketReset = invalidateTournamentBracketForBallotChange(tournamentIndex);
+
+    if (activeTournamentId === tournament.id) {
+        state.teams = normalizeTeams(state.teams).map((team) => (
+            team.id === normalizedId
+                ? { ...team, ...updatedTeam }
+                : team
+        ));
+    }
+
+    ballotEditingPlayerId = "";
+    await persistImmediately("full");
+    renderAll();
+    setBallotStatus(
+        bracketReset
+            ? `Saved ballot record for ${name}. Regenerate the bracket to continue.`
+            : `Saved ballot record for ${name}.`
+    );
+}
+
+async function deleteBallotPlayerRecord(playerId) {
+    const normalizedId = String(playerId || "").trim();
+    const tournamentIndex = state.tournaments.findIndex((item) => item.id === ballotTournamentId);
+    if (!normalizedId || tournamentIndex === -1) {
+        return;
+    }
+
+    const tournament = state.tournaments[tournamentIndex];
+    const player = normalizeTeams(tournament.teams).find((team) => team.id === normalizedId);
+    if (!player) {
+        return;
+    }
+
+    const confirmed = window.confirm(`Delete ballot record for "${player.name}"?`);
+    if (!confirmed) {
+        return;
+    }
+
+    state.tournaments[tournamentIndex].teams = normalizeTeams(tournament.teams).filter((team) => team.id !== normalizedId);
+    state.tournaments[tournamentIndex].playerCount = state.tournaments[tournamentIndex].teams.length;
+    const bracketReset = invalidateTournamentBracketForBallotChange(tournamentIndex);
+
+    if (activeTournamentId === tournament.id) {
+        state.teams = normalizeTeams(state.teams).filter((team) => team.id !== normalizedId);
+    }
+
+    ballotEditingPlayerId = "";
+    await persistImmediately("full");
+    renderAll();
+    setBallotStatus(
+        bracketReset
+            ? `Deleted ballot record for ${player.name}. Regenerate the bracket to continue.`
+            : `Deleted ballot record for ${player.name}.`
+    );
 }
 
 function openBracketWindow(tournament, bracket) {
@@ -5228,14 +5444,11 @@ function handleBracketSlotSwap(bracket, sectionKey, field, roundIndex, matchInde
     if (!currentMatch) {
         return;
     }
-    const currentSeedField = field === "slotA" ? "seedA" : "seedB";
-    const currentSeed = String(currentMatch[currentSeedField] || "").trim();
-
-    if (!currentSeed) {
+    if (!isSwappableBracketSlot(currentMatch, field)) {
         selectedBracketSwapSlot = null;
         renderBracket();
         refreshBracketPopup();
-        setBracketStatus("Only seeded player slots can be swapped.");
+        setBracketStatus("Only first-round player or BYE slots can be swapped.");
         return;
     }
 
@@ -5293,16 +5506,13 @@ function handleBracketSlotSwap(bracket, sectionKey, field, roundIndex, matchInde
     }
 
     const firstField = selectedBracketSwapSlot.field;
-    const firstSeedField = firstField === "slotA" ? "seedA" : "seedB";
 
     const firstValue = firstMatch[firstField];
-    const firstSeed = firstMatch[firstSeedField];
-
-    if (!String(firstSeed || "").trim()) {
+    if (!isSwappableBracketSlot(firstMatch, firstField)) {
         selectedBracketSwapSlot = null;
         renderBracket();
         refreshBracketPopup();
-        setBracketStatus("Only seeded player slots can be swapped.");
+        setBracketStatus("Only first-round player or BYE slots can be swapped.");
         return;
     }
 
@@ -5317,6 +5527,17 @@ function handleBracketSlotSwap(bracket, sectionKey, field, roundIndex, matchInde
     renderBracket();
     refreshBracketPopup();
     setBracketStatus("Players swapped. Review the bracket and click Save bracket to keep the changes.");
+}
+
+function isSwappableBracketSlot(match, field) {
+    if (!match) {
+        return false;
+    }
+    const slotField = field === "slotA" ? "slotA" : "slotB";
+    const seedField = field === "slotA" ? "seedA" : "seedB";
+    const label = String(match[slotField] || "").trim();
+    const seed = String(match[seedField] || "").trim();
+    return Boolean(seed || /^BYE$/i.test(label));
 }
 
 function renderFilterCategoryOptions() {
@@ -5763,6 +5984,87 @@ function normalizeLoadedState(parsed) {
             lastSavedAt: parsed?.meta?.lastSavedAt || "",
         },
     };
+}
+
+function buildPreferredByeSeededSlots(players, size) {
+    const remaining = players.map((player) => ({
+        id: player.id,
+        name: player.name,
+        registrationNumber: player.registrationNumber,
+        aadhar: player.aadhar,
+        organization: player.organization,
+        category: player.category,
+        contact: player.contact,
+        seed: "",
+    }));
+    const matchCount = Math.max(1, size / 2);
+    const byeCount = Math.max(0, size - remaining.length);
+    const preferredByeMatches = new Set(getPreferredByeMatchOrder(matchCount).slice(0, byeCount));
+    const seededSlots = Array.from({ length: size }, () => null);
+    let sequentialSlotNumber = 1;
+
+    const assignPlayerToSlot = (slotIndex, player) => {
+        if (!player) {
+            return;
+        }
+        seededSlots[slotIndex] = {
+            ...player,
+            seed: sequentialSlotNumber,
+        };
+        sequentialSlotNumber += 1;
+    };
+
+    for (let matchIndex = 0; matchIndex < matchCount; matchIndex += 1) {
+        const slotAIndex = matchIndex * 2;
+        const slotBIndex = slotAIndex + 1;
+
+        if (preferredByeMatches.has(matchIndex)) {
+            const nextPlayer = remaining.shift();
+            assignPlayerToSlot(slotAIndex, nextPlayer);
+            continue;
+        }
+
+        const playerA = remaining.shift();
+        assignPlayerToSlot(slotAIndex, playerA);
+
+        const candidateIndex = chooseBracketCandidateIndex(remaining, playerA);
+        const playerB = candidateIndex === -1 ? null : remaining.splice(candidateIndex, 1)[0];
+        assignPlayerToSlot(slotBIndex, playerB);
+    }
+
+    return seededSlots;
+}
+
+function getPreferredByeMatchOrder(matchCount) {
+    if (matchCount <= 1) {
+        return [0];
+    }
+
+    const used = new Set();
+    const order = [];
+    let edgeOffset = 0;
+    let centerOffset = 0;
+    const leftCenter = Math.floor((matchCount - 1) / 2);
+    const rightCenter = Math.floor(matchCount / 2);
+
+    const pushIfUnused = (value) => {
+        if (value < 0 || value >= matchCount || used.has(value)) {
+            return;
+        }
+        used.add(value);
+        order.push(value);
+    };
+
+    while (order.length < matchCount) {
+        pushIfUnused(edgeOffset);
+        pushIfUnused(matchCount - 1 - edgeOffset);
+        pushIfUnused(leftCenter - centerOffset);
+        pushIfUnused(rightCenter + centerOffset);
+        edgeOffset += 1;
+        centerOffset += 1;
+    }
+
+    return order;
 }
 
 function loadState() {
@@ -6315,6 +6617,22 @@ function persistWithMode(syncMode, options = {}) {
         lastSavedAt: new Date().toISOString(),
     };
     scheduleRemotePersist(false, syncMode, options);
+}
+
+async function persistImmediately(syncMode = "full", options = {}) {
+    state.meta = {
+        ...(state.meta || {}),
+        lastSavedAt: new Date().toISOString(),
+    };
+
+    if (remoteSyncTimer) {
+        clearTimeout(remoteSyncTimer);
+        remoteSyncTimer = null;
+    }
+
+    pendingRemoteSync = { mode: "full", options: {} };
+    remoteSyncInFlight = pushStateToSupabase(syncMode, options);
+    await remoteSyncInFlight;
 }
 
 function exportLocalBackup() {
